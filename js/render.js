@@ -170,4 +170,5 @@ function showStage(id, navEl) {
   const t = navEl || document.querySelector(`.nav-item[data-stage="${id}"]`);
   if (t) t.classList.add('active');
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (window.innerWidth <= 768) closeSidebar();
 }

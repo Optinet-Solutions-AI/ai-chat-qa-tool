@@ -10,6 +10,7 @@
 
 <!-- Header -->
 <header>
+  <button class="hamburger" id="hamburger" onclick="toggleSidebar()" aria-label="Menu">☰</button>
   <div class="logo">
     <div class="logo-mark">QA</div>
     <div class="logo-text">
@@ -28,9 +29,11 @@
   </div>
 </header>
 
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
+
 <div class="layout">
   <!-- Sidebar -->
-  <aside>
+  <aside id="sidebar">
     <div class="sb-prog">
       <div class="sbp-l">Overall Completion</div>
       <div class="sbp-n" id="overall-num">0 <span>/ 41 resolved</span></div>

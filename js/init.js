@@ -1,3 +1,15 @@
+// ── SIDEBAR TOGGLE (mobile) ───────────────────────────────────────
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sb-overlay').classList.toggle('open');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sb-overlay').classList.remove('open');
+}
+
 // ── EVENT LISTENERS ───────────────────────────────────────────────
 
 document.getElementById('add-overlay').addEventListener('click', e => {
