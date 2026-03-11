@@ -158,6 +158,27 @@ function renderOverview() {
       <td><span class="sst-go" onclick="showStage('${st.id}',null)">View →</span></td>`;
     tbody.appendChild(tr);
   });
+
+  // Mobile stage navigation cards
+  const msnEl = document.getElementById('mobile-stage-nav');
+  if (msnEl) {
+    msnEl.innerHTML = '';
+    stages.forEach((st, i) => {
+      const sq = questions.filter(q => q.stage === st.id);
+      const done = sq.filter(q => q.resolved).length;
+      const pillClass = done === sq.length ? 'done' : done > 0 ? 'part' : '';
+      const item = document.createElement('div');
+      item.className = 'msn-item';
+      item.onclick = () => showStage(st.id, null);
+      item.innerHTML = `
+        <div class="msn-l">
+          <div class="msn-ic">${st.emoji}</div>
+          <span>Stage ${i + 1} — ${esc(st.label)}</span>
+        </div>
+        <span class="msn-pill ${pillClass}">${done}/${sq.length}</span>`;
+      msnEl.appendChild(item);
+    });
+  }
 }
 
 // ── NAV ───────────────────────────────────────────────────────────

@@ -71,11 +71,13 @@
           <tr><td>Last Updated</td><td id="ov-date">—</td></tr>
         </table>
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px">Stage Breakdown</div>
-      <div class="info-bx"><table class="sst">
+      <div class="stage-breakdown-hdr" style="font-size:13px;font-weight:600;margin-bottom:10px">Stage Breakdown</div>
+      <div class="stage-breakdown-tbl info-bx"><table class="sst">
         <thead><tr><th>Stage</th><th>Resolved</th><th style="min-width:130px">Progress</th><th></th></tr></thead>
         <tbody id="sst-body"></tbody>
       </table></div>
+      <!-- Mobile-only stage navigation (rendered by renderOverview) -->
+      <div id="mobile-stage-nav" class="mobile-stage-nav"></div>
     </div>
 
     <!-- dynamic stage blocks rendered by renderStageBlocks() -->
