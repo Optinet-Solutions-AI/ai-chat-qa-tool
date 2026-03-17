@@ -3,8 +3,10 @@
 function setRole(r) {
   currentRole = r;
   save();
-  document.getElementById('role-adm').className = 'role-btn' + (r === 'admin' ? ' a-adm' : '');
-  document.getElementById('role-cli').className = 'role-btn' + (r === 'client' ? ' a-cli' : '');
+  const adm = document.getElementById('role-adm');
+  const cli = document.getElementById('role-cli');
+  if (adm) adm.className = 'role-btn' + (r === 'admin' ? ' a-adm' : '');
+  if (cli) cli.className = 'role-btn' + (r === 'client' ? ' a-cli' : '');
   document.getElementById('ov-role').textContent = r === 'admin' ? 'Admin' : 'Client';
   syncWhoUI();
 }
