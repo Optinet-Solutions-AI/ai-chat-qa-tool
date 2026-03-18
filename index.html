@@ -20,12 +20,15 @@
   </div>
   <div class="hdr-r">
     <div class="role-sw">
+      <!-- Role switcher can be hidden or kept. We will append user info next to it -->
       <button class="role-btn a-adm" id="role-adm" onclick="setRole('admin')">👤 Admin</button>
       <button class="role-btn" id="role-cli" onclick="setRole('client')">🏢 Client</button>
     </div>
     <span class="badge-v">v1.0 · Mar 2026</span>
     <button class="btn btn-g btn-sm" onclick="openAddModal()">＋ Add Question</button>
     <button class="btn btn-p btn-sm" onclick="exportMD()">↓ Export</button>
+    <button class="btn btn-p btn-sm" style="background:var(--accent2)" onclick="openImportModal()">✨ AI Import</button>
+    <div id="user-display" class="user-display hidden"></div>
   </div>
 </header>
 
@@ -139,6 +142,70 @@
   </div>
 </div>
 
+<!-- ── Welcome / Setup Modal ──────────────────────────────────── -->
+<div class="modal-overlay" id="welcome-overlay">
+  <div class="setup-card">
+    <div class="setup-icon">👋</div>
+    <h2 class="setup-title">Welcome to QA Dashboard</h2>
+    <p class="setup-sub">Please set up your profile to continue.</p>
+    
+    <div class="setup-form">
+      <div class="frow">
+        <label class="flbl">Full Name</label>
+        <input type="text" class="finput" id="setup-name" placeholder="e.g. Alex Smith" />
+        <div class="err-msg" id="err-name">Name is required</div>
+      </div>
+      
+      <div class="frow">
+        <label class="flbl">Role</label>
+        <div class="role-select" id="setup-role-group">
+          <div class="role-opt" onclick="selectSetupRole('admin', this)">
+            <div class="ro-ic">👤</div>
+            <div class="ro-t">Admin</div>
+          </div>
+          <div class="role-opt" onclick="selectSetupRole('client', this)">
+            <div class="ro-ic">🏢</div>
+            <div class="ro-t">User</div>
+          </div>
+        </div>
+        <div class="err-msg" id="err-role">Please select a role</div>
+      </div>
+      
+      <button class="btn btn-p full-width" onclick="saveUserSetup()">Continue to Dashboard →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── AI Import Modal ────────────────────────────────────────── -->
+<div class="add-overlay" id="import-overlay">
+  <div class="add-modal" style="width:600px">
+    <div class="add-title">AI Conversation Analysis</div>
+    
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchImportTab('upload')">Upload File</button>
+      <button class="tab-btn" onclick="switchImportTab('paste')">Paste Text</button>
+    </div>
+
+    <div id="tab-upload" class="tab-content active">
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+        <div class="dz-ic">📂</div>
+        <div class="dz-t">Click to upload JSON or ZIP</div>
+        <div class="dz-s" id="file-name">No file selected</div>
+        <input type="file" id="file-input" accept=".json,.zip" hidden onchange="handleFileSelect(this)"/>
+      </div>
+    </div>
+
+    <div id="tab-paste" class="tab-content">
+      <textarea class="fta" id="import-text" placeholder="Paste full conversation log here..." style="height:150px;font-family:monospace"></textarea>
+    </div>
+
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="closeImportModal()">Cancel</button>
+      <button class="btn btn-p" onclick="runAnalysis()">✨ Analyze Conversation</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Add Question Modal ─────────────────────────────────────── -->
 <div class="add-overlay" id="add-overlay">
   <div class="add-modal">
@@ -187,5 +254,6 @@
 <script src="js/export.js"></script>
 <script src="js/db.js"></script>
 <script src="js/init.js"></script>
+<script src="js/setup.js"></script>
 </body>
 </html>
