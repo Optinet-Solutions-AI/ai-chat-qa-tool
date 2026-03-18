@@ -178,6 +178,7 @@
     <div class="tabs">
       <button class="tab-btn active" onclick="switchImportTab('upload')">Upload File</button>
       <button class="tab-btn" onclick="switchImportTab('paste')">Paste Text</button>
+      <button class="tab-btn" onclick="switchImportTab('intercom')">Intercom ID</button>
     </div>
 
     <div id="tab-upload" class="tab-content active">
@@ -191,6 +192,13 @@
 
     <div id="tab-paste" class="tab-content">
       <textarea class="fta" id="import-text" placeholder="Paste full conversation log here..." style="height:150px;font-family:monospace"></textarea>
+    </div>
+
+    <div id="tab-intercom" class="tab-content">
+      <div class="frow">
+        <label class="flbl">Intercom Conversation ID</label>
+        <input type="text" class="finput" id="intercom-id" placeholder="e.g. 1234567890" />
+      </div>
     </div>
 
     <div class="modal-btns">

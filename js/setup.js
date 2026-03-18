@@ -103,6 +103,7 @@ function closeImportModal() {
   document.getElementById('file-input').value = '';
   document.getElementById('file-name').textContent = 'No file selected';
   document.getElementById('import-text').value = '';
+  document.getElementById('intercom-id').value = '';
   uploadedFileContent = null;
   
   // Clear analysis result
@@ -141,7 +142,7 @@ function handleFileSelect(input) {
 
 // ── AI ANALYSIS PLACEHOLDER ───────────────────────────────────────
 
-async function analyzeConversation(conversationText) {
+async function analyzeConversation(analysisInput) {
   try {
     // Call our serverless API endpoint. This relative path works for both
     // local development and production deployments (e.g., on Vercel).
@@ -150,7 +151,7 @@ async function analyzeConversation(conversationText) {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ text: conversationText })
+      body: JSON.stringify(analysisInput)
     });
 
     // Check contentType to avoid parsing errors if Vercel returns an HTML error page (like 404/500)
@@ -253,17 +254,29 @@ function applyAnalysisToDashboard() {
 }
 
 async function runAnalysis() {
-  // Determine source
-  let textToAnalyze = document.getElementById('import-text').value.trim();
-  
-  // If text is empty but we have a file loaded, use that
-  if (!textToAnalyze && uploadedFileContent) {
-    textToAnalyze = uploadedFileContent;
+  const activeTabId = document.querySelector('.tab-content.active').id;
+  let analysisInput = {};
+  let hasInput = false;
+
+  if (activeTabId === 'tab-paste' || activeTabId === 'tab-upload') {
+    let textToAnalyze = document.getElementById('import-text').value.trim();
+    if (!textToAnalyze && uploadedFileContent) {
+      textToAnalyze = uploadedFileContent;
+    }
+    if (textToAnalyze) {
+      analysisInput = { text: textToAnalyze };
+      hasInput = true;
+    }
+  } else if (activeTabId === 'tab-intercom') {
+    const intercomId = document.getElementById('intercom-id').value.trim();
+    if (intercomId) {
+      analysisInput = { intercomId: intercomId };
+      hasInput = true;
+    }
   }
 
-  if (!textToAnalyze) {
-    if (typeof toast === 'function') toast('Please upload a file or paste text', 'i');
-    else alert('Please upload a file or paste text');
+  if (!hasInput) {
+    if (typeof toast === 'function') toast('Please provide input for analysis', 'i');
     return;
   }
 
@@ -275,7 +288,7 @@ async function runAnalysis() {
   btn.disabled = true;
 
   try {
-    const result = await analyzeConversation(textToAnalyze);
+    const result = await analyzeConversation(analysisInput);
     if (typeof toast === 'function') toast('Conversation analyzed successfully', 'ok');
     
     showAnalysisResult(result);
