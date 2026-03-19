@@ -271,6 +271,34 @@
   </div>
 </div>
 
+<!-- ── Export Modal ───────────────────────────────────────────── -->
+<div class="add-overlay" id="export-overlay">
+  <div class="add-modal">
+    <div class="add-title">↓ Export Data</div>
+    <p style="font-size:13px;color:var(--text3);margin-bottom:18px">Choose what to include in the export.</p>
+    <div class="export-options">
+      <label class="export-opt">
+        <input type="checkbox" id="exp-qa" checked/>
+        <div class="export-opt-body">
+          <div class="export-opt-title">📋 Q&amp;A Sections</div>
+          <div class="export-opt-sub">All questions, threads, and resolved status</div>
+        </div>
+      </label>
+      <label class="export-opt">
+        <input type="checkbox" id="exp-conv" checked/>
+        <div class="export-opt-body">
+          <div class="export-opt-title">🧠 Conversation Analysis</div>
+          <div class="export-opt-sub">Analyzed conversations, sentiment, intent, summaries and team notes</div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="closeExportModal()">Cancel</button>
+      <button class="btn btn-p" onclick="runExport()">↓ Download</button>
+    </div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts"></div>
 
 <!-- Supabase CDN + config (must load before app scripts) -->
