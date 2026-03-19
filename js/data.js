@@ -4,6 +4,7 @@ const DEFAULT_STAGES = [
   { id: 's1', label: 'Intercom Chat',           emoji: '💬' },
   { id: 's2', label: 'Data Collection (API)',   emoji: '🔌' },
   { id: 's3', label: 'AI Monitoring & Analysis',emoji: '🤖' },
+  { id: 's-ai', label: 'Conversation Analysis', emoji: '🔬' },
   { id: 's4', label: 'Insights & Alerts',       emoji: '🔔' },
   { id: 's5', label: 'Reports + Tickets',       emoji: '📋' },
   { id: 's6', label: 'General Architecture',    emoji: '⚙️' },

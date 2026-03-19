@@ -213,8 +213,8 @@ function showAnalysisResult(data) {
 function applyAnalysisToDashboard() {
   if (!window.aiAnalysisData) return;
 
-  // Default to 's3' (AI Monitoring) or fallback to first stage
-  let targetStage = stages.find(s => s.id === 's3') || stages[0];
+  // Default to 's-ai' (Conversation Analysis) or fallback to first stage
+  let targetStage = stages.find(s => s.id === 's-ai') || stages[0];
   if (!targetStage) {
     if (typeof toast === 'function') toast('No sections available', 'i');
     return;
