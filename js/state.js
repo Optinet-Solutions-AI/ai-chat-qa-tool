@@ -48,7 +48,13 @@ async function loadState() {
       const d = JSON.parse(s);
       questions = d.questions;
       stages    = d.stages || JSON.parse(JSON.stringify(DEFAULT_STAGES));
-      conversations = d.conversations || [];
+      // Prefer the dedicated conversations key; fall back to the bundled one
+      try {
+        const lc = localStorage.getItem('qa-conv-v1');
+        conversations = lc ? JSON.parse(lc) : (d.conversations || []);
+      } catch(_) {
+        conversations = d.conversations || [];
+      }
     } else {
       initDefault();
     }
@@ -66,9 +72,11 @@ function initDefault() {
   }));
 }
 
-// Persists role locally; also full-saves to localStorage when Supabase is not active
+// Persists role locally; also full-saves to localStorage when Supabase is not active.
+// Conversations are always saved locally — they have no Supabase table.
 function save() {
   localStorage.setItem('qa-role', currentRole);
+  localStorage.setItem('qa-conv-v1', JSON.stringify(conversations));
   if (!window.db) {
     localStorage.setItem(SK, JSON.stringify({ questions, stages, conversations, role: currentRole }));
   }
