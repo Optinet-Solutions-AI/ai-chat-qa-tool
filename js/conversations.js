@@ -131,11 +131,6 @@ async function reanalyzeConversation(cid) {
   const c = conversations.find(x => x.id === cid);
   if (!c) return;
 
-  if (!c.notes || c.notes.length === 0) {
-    toast('Add at least one note before re-analyzing', 'i');
-    return;
-  }
-
   const btn = document.getElementById('reanalyze-btn-' + cid);
   if (btn) { btn.textContent = 'Analyzing…'; btn.disabled = true; }
 
@@ -154,10 +149,15 @@ async function reanalyzeConversation(cid) {
       textToSend = `Previous analysis:\nSentiment: ${c.sentiment}\nIntent: ${c.intent}\nSummary: ${c.summary}\n\n=== TEAM NOTES FOR IMPROVED ANALYSIS ===\n${notesText}\n\nBased on the team's feedback, provide an improved sentiment, intent, and summary.`;
     }
 
+    const payload = { text: textToSend };
+    if (typeof getActivePromptContent === 'function') {
+      payload.customSystemPrompt = getActivePromptContent();
+    }
+
     const response = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textToSend })
+      body: JSON.stringify(payload)
     });
 
     const contentType = response.headers.get('content-type');

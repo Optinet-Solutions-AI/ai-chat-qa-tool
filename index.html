@@ -45,6 +45,9 @@
       <div class="nav-l"><div class="nav-ic">🧠</div><span class="nav-label">Conversation Analysis</span></div>
       <span class="npill" id="pill-conversations">0</span>
     </div>
+    <div class="nav-item" data-stage="prompts" onclick="showPromptLibrary(this)">
+      <div class="nav-l"><div class="nav-ic">📝</div><span class="nav-label">Prompt Library</span></div>
+    </div>
     <div class="sb-div"></div>
     <div class="sb-lbl">Q&amp;A Sections</div>
     <!-- dynamic stage nav rendered by renderSidebar() -->
@@ -116,6 +119,18 @@
         </div>
       </div>
       <div id="conv-list"></div>
+    </div>
+
+    <!-- Prompt Library Section -->
+    <div class="stage-blk" id="stage-prompts">
+      <div class="stage-hdr">
+        <div>
+          <div class="s-ey">📝 Prompts</div>
+          <div class="s-ti">Prompt Library</div>
+          <div class="s-sub">View, edit and manage the AI analysis prompt</div>
+        </div>
+      </div>
+      <div id="pl-content"></div>
     </div>
 
     <!-- dynamic stage blocks rendered by renderStageBlocks() -->
@@ -318,6 +333,7 @@
 <script src="js/export.js"></script>
 <script src="js/db.js"></script>
 <script src="js/conversations.js"></script>
+<script src="js/prompt-library.js"></script>
 <script src="js/init.js"></script>
 <script src="js/setup.js"></script>
 </body>

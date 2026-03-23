@@ -25,4 +25,6 @@ document.getElementById('stage-overlay').addEventListener('click', e => {
 (async function boot() {
   await loadState();
   renderAll();
+  initPrompts();
+  renderPromptLibrary();
 })();

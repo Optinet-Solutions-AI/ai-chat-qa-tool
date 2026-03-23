@@ -335,6 +335,11 @@ async function runAnalysis() {
     }
   }
 
+  // Attach active prompt if the Prompt Library is available
+  if (hasInput && typeof getActivePromptContent === 'function') {
+    analysisInput.customSystemPrompt = getActivePromptContent();
+  }
+
   if (!hasInput) {
     if (typeof toast === 'function') toast('Please provide input for analysis', 'i');
     return;

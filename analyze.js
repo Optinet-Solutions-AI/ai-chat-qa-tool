@@ -18,7 +18,9 @@ export default async function handler(req, res) {
     // Legacy support
     messages,
     text,
-    intercomId
+    intercomId,
+    // Optional custom prompt override from the Prompt Library
+    customSystemPrompt
   } = req.body;
 
   let contentToAnalyze = transcript;
@@ -76,7 +78,7 @@ export default async function handler(req, res) {
     ? contentToAnalyze.substring(0, MAX_CHARS) + '\n\n[Transcript truncated]'
     : contentToAnalyze;
 
-  const systemPrompt = `You are an expert Quality Assurance analyst for a regulated iGaming (online casino/sports betting) customer support operation. Analyze the support conversation and return ONLY a valid JSON object — no preamble, no explanation, no markdown.
+  const systemPrompt = customSystemPrompt || `You are an expert Quality Assurance analyst for a regulated iGaming (online casino/sports betting) customer support operation. Analyze the support conversation and return ONLY a valid JSON object — no preamble, no explanation, no markdown.
 
 LANGUAGE HANDLING:
 The conversation transcript may be in any of these languages:
