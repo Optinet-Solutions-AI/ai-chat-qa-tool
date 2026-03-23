@@ -289,24 +289,22 @@
 
 <!-- ── Run Analyze Modal ──────────────────────────────────────── -->
 <div class="add-overlay" id="run-analyze-overlay">
-  <div class="add-modal" style="width:640px;max-width:96vw">
+  <div class="add-modal ra-modal">
     <div class="add-title">✨ Run Analyze</div>
-    <p class="ra-subtitle">Test your prompt against a conversation. Results are <strong>not saved</strong> to the dashboard.</p>
+    <p class="ra-subtitle">Choose a conversation to test against the active prompt. Result is <strong>not saved</strong>.</p>
 
-    <div class="ra-prompt-bar" id="ra-prompt-bar">
+    <div class="ra-prompt-bar">
       <span class="ra-prompt-label">Active prompt:</span>
       <span class="ra-prompt-name" id="ra-prompt-name">—</span>
       <button class="ra-edit-link" onclick="closeRunAnalyzeModal();showPromptLibrary(null)">Edit Prompt →</button>
     </div>
 
-    <div class="frow">
-      <label class="flbl">Paste Conversation</label>
-      <textarea class="fta" id="ra-text" placeholder="Paste the full conversation transcript here…" style="min-height:160px;font-family:monospace;font-size:12px"></textarea>
-    </div>
+    <label class="flbl" style="display:block;margin-bottom:6px">Select Conversation</label>
+    <div class="ra-conv-list" id="ra-conv-list"></div>
 
-    <div class="modal-btns" style="margin-bottom:0">
+    <div class="modal-btns" style="margin-bottom:0;margin-top:16px">
       <button class="btn btn-g" onclick="closeRunAnalyzeModal()">Cancel</button>
-      <button class="btn btn-p" id="ra-run-btn" onclick="runPromptTest()">▶ Analyze</button>
+      <button class="btn btn-p" id="ra-run-btn" onclick="runPromptTest()" disabled>▶ Analyze</button>
     </div>
 
     <div id="ra-result" class="ra-result" style="display:none"></div>

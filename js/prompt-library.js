@@ -236,35 +236,87 @@ function useHistoryPrompt(id) {
 
 // ── RUN ANALYZE MODAL ──────────────────────────────────────────────
 
+let _raSelectedId = null;
+
 function openRunAnalyzeModal() {
   const overlay = document.getElementById('run-analyze-overlay');
   if (!overlay) return;
 
-  // Show active prompt name
-  const active = getActivePrompt();
-  const nameEl = document.getElementById('ra-prompt-name');
-  if (nameEl) nameEl.textContent = active.name || 'Default QA Prompt';
+  _raSelectedId = null;
 
-  // Reset state
-  const ta = document.getElementById('ra-text');
-  if (ta) ta.value = '';
-  const result = document.getElementById('ra-result');
-  if (result) { result.style.display = 'none'; result.innerHTML = ''; }
+  // Show active prompt name
+  const nameEl = document.getElementById('ra-prompt-name');
+  if (nameEl) nameEl.textContent = getActivePrompt().name || 'Default QA Prompt';
+
+  // Reset result
+  const resultEl = document.getElementById('ra-result');
+  if (resultEl) { resultEl.style.display = 'none'; resultEl.innerHTML = ''; }
+
+  // Reset button
   const btn = document.getElementById('ra-run-btn');
-  if (btn) { btn.textContent = '▶ Analyze'; btn.disabled = false; }
+  if (btn) { btn.textContent = '▶ Analyze'; btn.disabled = true; }
+
+  // Populate conversation list
+  _renderRaConvList();
 
   overlay.classList.add('open');
+}
+
+function _renderRaConvList() {
+  const listEl = document.getElementById('ra-conv-list');
+  if (!listEl) return;
+
+  if (!conversations || conversations.length === 0) {
+    listEl.innerHTML = '<div class="ra-empty">No conversations saved yet. Use "Add Conversation" to add one first.</div>';
+    return;
+  }
+
+  const sorted = conversations.slice().sort((a, b) => new Date(b.analyzed_at) - new Date(a.analyzed_at));
+
+  listEl.innerHTML = sorted.map(c => {
+    const hasText = !!c.original_text;
+    const date = c.analyzed_at ? fmtTime(c.analyzed_at) : '';
+    const sentClass = getSentClass(c.sentiment);
+    return `<div class="ra-conv-item${hasText ? '' : ' ra-no-transcript'}" id="ra-item-${c.id}"
+                 onclick="${hasText ? `selectRaConv('${c.id}')` : ''}">
+      <div class="ra-conv-top">
+        <span class="conv-badge ${sentClass}">${esc(c.sentiment || 'Unknown')}</span>
+        <span class="ra-conv-date">${date}</span>
+      </div>
+      <div class="ra-conv-title">${esc(c.title)}</div>
+      ${!hasText ? '<div class="ra-no-transcript-note">No transcript — cannot re-analyze</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function selectRaConv(id) {
+  _raSelectedId = id;
+
+  // Highlight selected
+  document.querySelectorAll('.ra-conv-item').forEach(el => el.classList.remove('selected'));
+  const item = document.getElementById('ra-item-' + id);
+  if (item) item.classList.add('selected');
+
+  // Enable button
+  const btn = document.getElementById('ra-run-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Analyze'; }
+
+  // Hide previous result
+  const resultEl = document.getElementById('ra-result');
+  if (resultEl) { resultEl.style.display = 'none'; resultEl.innerHTML = ''; }
 }
 
 function closeRunAnalyzeModal() {
   const overlay = document.getElementById('run-analyze-overlay');
   if (overlay) overlay.classList.remove('open');
+  _raSelectedId = null;
 }
 
 async function runPromptTest() {
-  const ta = document.getElementById('ra-text');
-  const text = ta ? ta.value.trim() : '';
-  if (!text) { toast('Paste a conversation first', 'i'); return; }
+  if (!_raSelectedId) { toast('Select a conversation first', 'i'); return; }
+
+  const c = conversations.find(x => x.id === _raSelectedId);
+  if (!c || !c.original_text) { toast('This conversation has no transcript to analyze', 'i'); return; }
 
   const btn = document.getElementById('ra-run-btn');
   if (btn) { btn.textContent = 'Analyzing…'; btn.disabled = true; }
@@ -273,9 +325,7 @@ async function runPromptTest() {
   if (resultEl) { resultEl.style.display = 'none'; resultEl.innerHTML = ''; }
 
   try {
-    const payload = { text };
-    const active = getActivePrompt();
-    if (active && active.content) payload.customSystemPrompt = active.content;
+    const payload = { text: c.original_text, customSystemPrompt: getActivePrompt().content };
 
     const response = await fetch('/api/analyze', {
       method: 'POST',
@@ -289,7 +339,7 @@ async function runPromptTest() {
 
     if (resultEl) {
       resultEl.style.display = 'block';
-      resultEl.innerHTML = buildTestResultHTML(data);
+      resultEl.innerHTML = buildTestResultHTML(c.title, data);
     }
   } catch (err) {
     toast(err.message, 'i');
@@ -298,29 +348,31 @@ async function runPromptTest() {
   }
 }
 
-function buildTestResultHTML(d) {
+function buildTestResultHTML(convTitle, d) {
   const severity = d.dissatisfaction_severity || '—';
   const severityColor = { Low: 'var(--green)', Medium: 'var(--amber)', High: 'var(--red)', Critical: 'var(--red)' }[severity] || 'var(--text2)';
-
   const resColor = d.resolution_status === 'Resolved' ? 'var(--green)' : d.resolution_status === 'Unresolved' ? 'var(--red)' : 'var(--amber)';
 
   const rows = [
-    ['Summary',         esc(d.summary || '—')],
-    ['Severity',        `<span style="color:${severityColor};font-weight:700">${esc(severity)}</span>`],
-    ['Issue Category',  esc(d.issue_category || '—')],
-    ['Resolution',      `<span style="color:${resColor};font-weight:700">${esc(d.resolution_status || '—')}</span>`],
-    ['Language',        esc(d.language || '—')],
-    ['Agent Score',     d.agent_performance_score != null ? esc(String(d.agent_performance_score)) : 'N/A'],
-    ['Agent Notes',     esc(d.agent_performance_notes || '—')],
-    ['Key Quotes',      esc(d.key_quotes || '—')],
-    ['Recommended',     esc(d.recommended_action || '—')],
-    ['Alert',           d.is_alert_worthy ? `<span style="color:var(--red);font-weight:700">⚠ Yes — ${esc(d.alert_reason || '')}</span>` : '<span style="color:var(--green)">No</span>'],
+    ['Summary',        esc(d.summary || '—')],
+    ['Severity',       `<span style="color:${severityColor};font-weight:700">${esc(severity)}</span>`],
+    ['Issue Category', esc(d.issue_category || '—')],
+    ['Resolution',     `<span style="color:${resColor};font-weight:700">${esc(d.resolution_status || '—')}</span>`],
+    ['Language',       esc(d.language || '—')],
+    ['Agent Score',    d.agent_performance_score != null ? esc(String(d.agent_performance_score)) : 'N/A'],
+    ['Agent Notes',    esc(d.agent_performance_notes || '—')],
+    ['Key Quotes',     esc(d.key_quotes || '—')],
+    ['Recommended',    esc(d.recommended_action || '—')],
+    ['Alert',          d.is_alert_worthy ? `<span style="color:var(--red);font-weight:700">⚠ Yes — ${esc(d.alert_reason || '')}</span>` : '<span style="color:var(--green)">No</span>'],
   ].map(([label, val]) =>
     `<div class="ra-row"><span class="ra-lbl">${label}</span><span class="ra-val">${val}</span></div>`
   ).join('');
 
   return `<div class="ra-result-inner">
-    <div class="ra-result-hdr">Analysis Result <span class="ra-result-note">not saved</span></div>
+    <div class="ra-result-hdr">
+      Result for: <em style="color:var(--text2);font-style:normal">${esc(convTitle)}</em>
+      <span class="ra-result-note">not saved</span>
+    </div>
     ${rows}
   </div>`;
 }
