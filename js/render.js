@@ -255,42 +255,40 @@ function updatePills() {
 // ── OVERVIEW ──────────────────────────────────────────────────────
 
 function renderOverview() {
+  // Overview block removed — all elements may not exist; guard every access
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
   const tot = questions.length;
   const res = questions.filter(q => q.resolved).length;
   const disc = questions.filter(q => !q.resolved && q.thread.length > 0).length;
   const pend = tot - res - disc;
 
-  document.getElementById('ov-total').textContent = tot;
-  document.getElementById('ov-res').textContent = res;
-  document.getElementById('ov-disc').textContent = disc;
-  document.getElementById('ov-pend').textContent = pend;
-  const convEl = document.getElementById('ov-conv');
-  if (convEl) convEl.textContent = conversations.length;
-  document.getElementById('ov-date').textContent = new Date().toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric',
-  });
-  document.getElementById('ov-role').textContent = currentRole === 'admin' ? 'Admin' : 'Client';
+  set('ov-total', tot);
+  set('ov-res', res);
+  set('ov-disc', disc);
+  set('ov-pend', pend);
+  set('ov-conv', conversations.length);
+  set('ov-date', new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }));
+  set('ov-role', currentRole === 'admin' ? 'Admin' : 'Client');
+  set('ov-conv-count', conversations.length === 0 ? 'None yet' : conversations.length + ' analyzed');
 
   const tbody = document.getElementById('sst-body');
-  tbody.innerHTML = '';
-  stages.forEach((st, i) => {
-    const sq = questions.filter(q => q.stage === st.id);
-    const done = sq.filter(q => q.resolved).length;
-    const pct = sq.length ? Math.round(done / sq.length * 100) : 0;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="font-weight:500">${st.emoji} Section ${i + 1} — ${esc(st.label)}</td>
-      <td style="color:var(--text2)">${done} / ${sq.length}</td>
-      <td><span style="font-size:11px;color:var(--text3)">${pct}%</span><div class="sst-mini"><div class="sst-mini-f" style="width:${pct}%"></div></div></td>
-      <td><span class="sst-go" onclick="showStage('${st.id}',null)">View →</span></td>`;
-    tbody.appendChild(tr);
-  });
+  if (tbody) {
+    tbody.innerHTML = '';
+    stages.forEach((st, i) => {
+      const sq = questions.filter(q => q.stage === st.id);
+      const done = sq.filter(q => q.resolved).length;
+      const pct = sq.length ? Math.round(done / sq.length * 100) : 0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-weight:500">${st.emoji} Section ${i + 1} — ${esc(st.label)}</td>
+        <td style="color:var(--text2)">${done} / ${sq.length}</td>
+        <td><span style="font-size:11px;color:var(--text3)">${pct}%</span><div class="sst-mini"><div class="sst-mini-f" style="width:${pct}%"></div></div></td>
+        <td><span class="sst-go" onclick="showStage('${st.id}',null)">View →</span></td>`;
+      tbody.appendChild(tr);
+    });
+  }
 
-  // Update conversation analysis summary block
-  const convCount = document.getElementById('ov-conv-count');
-  if (convCount) convCount.textContent = conversations.length === 0 ? 'None yet' : conversations.length + ' analyzed';
-
-  // Mobile stage navigation cards
   const msnEl = document.getElementById('mobile-stage-nav');
   if (msnEl) {
     msnEl.innerHTML = '';
@@ -311,7 +309,6 @@ function renderOverview() {
       msnEl.appendChild(item);
     });
 
-    // Conversation Analysis card
     const convItem = document.createElement('div');
     convItem.className = 'msn-item msn-conv';
     convItem.onclick = () => showConversations(null);
