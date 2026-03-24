@@ -237,8 +237,10 @@ function updateGlobal() {
   const done = questions.filter(q => q.resolved).length;
   const tot = questions.length;
   const pct = tot ? Math.round(done / tot * 100) : 0;
-  document.getElementById('overall-num').innerHTML = `${done} <span>/ ${tot} resolved</span>`;
-  document.getElementById('overall-bar').style.width = pct + '%';
+  const numEl = document.getElementById('overall-num');
+  const barEl = document.getElementById('overall-bar');
+  if (numEl) numEl.innerHTML = `${done} <span>/ ${tot} resolved</span>`;
+  if (barEl) barEl.style.width = pct + '%';
 }
 
 function updatePills() {
