@@ -31,16 +31,7 @@
 <div class="layout">
   <!-- Sidebar -->
   <aside id="sidebar">
-    <div class="sb-prog">
-      <div class="sbp-l">Overall Completion</div>
-      <div class="sbp-n" id="overall-num">0 <span>/ 41 resolved</span></div>
-      <div class="pbar"><div class="pbar-f" id="overall-bar" style="width:0%"></div></div>
-    </div>
-    <div class="sb-div"></div>
     <div class="sb-lbl">Navigation</div>
-    <div class="nav-item" data-stage="overview" onclick="showStage('overview',this)">
-      <div class="nav-l"><div class="nav-ic">🏠</div>Overview</div>
-    </div>
     <div class="nav-item active" data-stage="conversations" onclick="showConversations(this)">
       <div class="nav-l"><div class="nav-ic">🧠</div><span class="nav-label">Conversation Analysis</span></div>
       <span class="npill" id="pill-conversations">0</span>
@@ -59,54 +50,6 @@
     <div class="mobile-actions" style="display:none">
       <button class="btn btn-g btn-sm" onclick="openAddModal()">＋ Add Question</button>
       <button class="btn btn-p btn-sm" onclick="exportMD()">↓ Export</button>
-    </div>
-
-    <!-- Overview -->
-    <div class="stage-blk" id="stage-overview">
-      <div class="stage-hdr"><div>
-        <div class="s-ey">Dashboard</div>
-        <div class="s-ti">Overview</div>
-        <div class="s-sub">All sections · Chat Monitoring & Analysis</div>
-      </div></div>
-      <div class="ov-top-row">
-        <div class="ov-grid">
-          <div class="ov-card"><div class="ov-l">Total Questions</div><div class="ov-v" id="ov-total">41</div><div class="ov-s">across all sections</div></div>
-          <div class="ov-card"><div class="ov-l">Resolved</div><div class="ov-v" id="ov-res" style="color:var(--green)">—</div><div class="ov-s">marked answered</div></div>
-          <div class="ov-card"><div class="ov-l">In Discussion</div><div class="ov-v" id="ov-disc" style="color:var(--accent)">—</div><div class="ov-s">active threads</div></div>
-          <div class="ov-card"><div class="ov-l">Pending</div><div class="ov-v" id="ov-pend" style="color:var(--amber)">—</div><div class="ov-s">no replies yet</div></div>
-          <div class="ov-card"><div class="ov-l">Conversations</div><div class="ov-v" id="ov-conv" style="color:var(--accent2)">0</div><div class="ov-s">analyzed</div></div>
-        </div>
-        <div class="info-bx ov-meta">
-          <table>
-            <tr><td>Document</td><td>QA - AI Tool</td><td>Current Role</td><td id="ov-role">Admin</td></tr>
-            <tr><td>Prepared</td><td>March 6, 2026</td><td>Last Updated</td><td id="ov-date">—</td></tr>
-            <tr><td>Version</td><td>1.0</td><td></td><td></td></tr>
-          </table>
-        </div>
-      </div>
-      <!-- Conversation Analysis summary -->
-      <div class="ov-conv-block" id="ov-conv-block" onclick="showConversations(null)">
-        <div class="ov-conv-left">
-          <div class="ov-conv-ic">🧠</div>
-          <div>
-            <div class="ov-conv-title">Conversation Analysis</div>
-            <div class="ov-conv-sub">AI-analyzed conversations with team notes</div>
-          </div>
-        </div>
-        <div class="ov-conv-right">
-          <span class="ov-conv-count" id="ov-conv-count">0 analyzed</span>
-          <span class="ov-conv-go">View →</span>
-        </div>
-      </div>
-
-      <div class="stage-breakdown-hdr" style="font-size:13px;font-weight:600;margin-bottom:10px">Section Breakdown</div>
-      <div class="stage-breakdown-tbl info-bx"><table class="sst">
-        <colgroup><col style="width:20%"><col style="width:20%"><col style="width:50%"><col style="width:10%"></colgroup>
-        <thead><tr><th>Section</th><th>Resolved</th><th>Progress</th><th></th></tr></thead>
-        <tbody id="sst-body"></tbody>
-      </table></div>
-      <!-- Mobile-only stage navigation (rendered by renderOverview) -->
-      <div id="mobile-stage-nav" class="mobile-stage-nav"></div>
     </div>
 
     <!-- Conversation Analysis Section -->
