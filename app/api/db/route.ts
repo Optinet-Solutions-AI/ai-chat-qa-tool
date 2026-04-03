@@ -11,6 +11,7 @@ import {
   dbDeletePrompt,
   dbActivatePrompt,
   dbInsertAnalysisRun,
+  dbDeleteAnalysisRun,
   loadFromSupabase,
 } from '@/lib/db';
 import type { Conversation, ConversationNote, PromptVersion, AnalysisRun } from '@/lib/types';
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
       case 'deletePrompt':        await dbDeletePrompt(payload.id as string); break;
       case 'activatePrompt':      await dbActivatePrompt(payload.id as string); break;
       case 'insertAnalysisRun':   await dbInsertAnalysisRun(payload as AnalysisRun); break;
+      case 'deleteAnalysisRun':   await dbDeleteAnalysisRun(payload.id as string); break;
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }

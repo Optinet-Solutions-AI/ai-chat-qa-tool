@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import ToastProvider from './ToastProvider';
+import ConfirmProvider from './ConfirmProvider';
 import AppInitializer from './AppInitializer';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -31,6 +32,7 @@ export default function RootShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
+    <ConfirmProvider>
     <ToastProvider>
       <AppInitializer>
         <div className="flex h-screen overflow-hidden bg-[#f4f6f9]">
@@ -56,5 +58,6 @@ export default function RootShell({ children }: { children: React.ReactNode }) {
         )}
       </AppInitializer>
     </ToastProvider>
+    </ConfirmProvider>
   );
 }

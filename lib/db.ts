@@ -43,16 +43,16 @@ function conversationRow(c: Conversation) {
     query_type: c.query_type,
     ai_subject: c.ai_subject,
     ai_issue_summary: c.ai_issue_summary,
-    cx_score_rating: c.cx_score_rating,
+    cx_score_rating: c.cx_score_rating != null ? Math.round(c.cx_score_rating) : null,
     cx_score_explanation: c.cx_score_explanation,
-    conversation_rating_score: c.conversation_rating_score,
+    conversation_rating_score: c.conversation_rating_score != null ? Math.round(c.conversation_rating_score) : null,
     conversation_rating_remark: c.conversation_rating_remark,
 
-    time_to_assignment: c.time_to_assignment,
-    time_to_admin_reply: c.time_to_admin_reply,
-    time_to_first_close: c.time_to_first_close,
-    median_time_to_reply: c.median_time_to_reply,
-    count_reopens: c.count_reopens,
+    time_to_assignment: c.time_to_assignment != null ? Math.round(c.time_to_assignment) : null,
+    time_to_admin_reply: c.time_to_admin_reply != null ? Math.round(c.time_to_admin_reply) : null,
+    time_to_first_close: c.time_to_first_close != null ? Math.round(c.time_to_first_close) : null,
+    median_time_to_reply: c.median_time_to_reply != null ? Math.round(c.median_time_to_reply) : null,
+    count_reopens: c.count_reopens != null ? Math.round(c.count_reopens) : null,
 
     sentiment: c.sentiment,
     summary: c.summary,
@@ -187,6 +187,11 @@ export async function dbActivatePrompt(id: string): Promise<void> {
 export async function dbInsertAnalysisRun(run: AnalysisRun): Promise<void> {
   const { error } = await supabase.from('analysis_runs').insert(run);
   if (error) throw new Error(`[db] insert analysis run: ${error.message} (code: ${error.code})`);
+}
+
+export async function dbDeleteAnalysisRun(id: string): Promise<void> {
+  const { error } = await supabase.from('analysis_runs').delete().eq('id', id);
+  if (error) throw new Error(`[db] delete analysis run: ${error.message}`);
 }
 
 export async function loadAnalysisRuns(page = 0, perPage = 25): Promise<{ runs: AnalysisRun[]; total: number }> {

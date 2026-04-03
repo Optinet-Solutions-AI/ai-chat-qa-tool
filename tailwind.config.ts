@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import defaultTheme from 'tailwindcss/defaultTheme';
 
 const config: Config = {
   content: [
@@ -8,6 +9,9 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Montserrat', ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         accent: '#4f8ef7',
         accent2: '#7c3aed',

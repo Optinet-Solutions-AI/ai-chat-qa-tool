@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
+import { useConfirm } from '@/components/layout/ConfirmProvider';
 import { generateId, fmtTime, fmtSeconds } from '@/lib/utils';
 import { dbInsertConversation, dbUpdateConversation } from '@/lib/db-client';
 import type { ConversationFetchResult, Conversation } from '@/lib/types';
@@ -29,6 +30,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 export default function AddConversationModal({ onClose }: Props) {
   const { conversations, addConversation, updateConversation } = useStore();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const [intercomId, setIntercomId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -52,15 +54,16 @@ export default function AddConversationModal({ onClose }: Props) {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!preview) return;
     const r = preview;
 
     // Check for existing conversation with the same Intercom ID
     const existing = conversations.find((c) => c.intercom_id === r.intercom_id);
     if (existing) {
-      const confirmed = window.confirm(
-        `A conversation with Intercom ID "${r.intercom_id}" already exists.\n\nOverwriting will refresh all data from Intercom but keep existing notes and analysis history.\n\nContinue?`
+      const confirmed = await confirm(
+        `A conversation with Intercom ID "${r.intercom_id}" already exists.\n\nOverwriting will refresh all data from Intercom but keep existing notes and analysis history.\n\nContinue?`,
+        { title: 'Duplicate Conversation', confirmLabel: 'Overwrite' }
       );
       if (!confirmed) return;
     }

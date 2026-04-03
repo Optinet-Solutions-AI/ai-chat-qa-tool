@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Conversation, ConversationNote, PromptVersion, AnalysisResult, AnalysisRun } from '@/lib/types';
 import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
+import { useConfirm } from '@/components/layout/ConfirmProvider';
 import { generateId, fmtTime, fmtSeconds } from '@/lib/utils';
 import { dbDeleteConversation, dbInsertNote, dbUpdateNote, dbDeleteNote, dbUpdateConversation, dbInsertAnalysisRun } from '@/lib/db-client';
 import AnalysisResultView from '@/components/conversations/AnalysisResultView';
@@ -162,6 +163,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
   const router = useRouter();
   const { deleteConversation, updateConversation, addNote, updateNote, deleteNote, currentUser, prompts } = useStore();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const conv = conversation;
 
@@ -264,8 +266,8 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  const handleDelete = () => {
-    if (!window.confirm('Delete this conversation?')) return;
+  const handleDelete = async () => {
+    if (!await confirm('Delete this conversation?', { danger: true, confirmLabel: 'Delete' })) return;
     deleteConversation(conv.id);
     dbDeleteConversation(conv.id);
     toast('Conversation deleted', 'success');

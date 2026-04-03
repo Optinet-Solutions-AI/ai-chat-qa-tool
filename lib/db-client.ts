@@ -51,6 +51,7 @@ export const dbDeleteNote = (id: string)                              => call('d
 // ── Analysis Runs ──────────────────────────────────────────────────────────
 
 export const dbInsertAnalysisRun = (run: AnalysisRun) => call('insertAnalysisRun', run);
+export const dbDeleteAnalysisRun = (id: string)       => call('deleteAnalysisRun', { id });
 
 // ── Prompts ────────────────────────────────────────────────────────────────
 

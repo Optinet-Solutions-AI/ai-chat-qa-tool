@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { PromptVersion } from '@/lib/types';
 import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
+import { useConfirm } from '@/components/layout/ConfirmProvider';
 import { generateId, fmtTime } from '@/lib/utils';
 import { dbInsertPrompt, dbUpdatePrompt, dbDeletePrompt, dbActivatePrompt } from '@/lib/db-client';
 
@@ -34,6 +35,7 @@ function IconDocument() {
 export default function PromptLibrary() {
   const { prompts, addPrompt, updatePrompt, deletePrompt, activatePrompt } = useStore();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     // Pre-select the active prompt if any
@@ -45,16 +47,16 @@ export default function PromptLibrary() {
 
   const selected = prompts.find((p) => p.id === selectedId) ?? null;
 
-  const handleSelect = (p: PromptVersion) => {
-    if (isDirty && !window.confirm('Discard unsaved changes?')) return;
+  const handleSelect = async (p: PromptVersion) => {
+    if (isDirty && !await confirm('Discard unsaved changes?', { confirmLabel: 'Discard' })) return;
     setSelectedId(p.id);
     setEditTitle(p.title);
     setEditContent(p.content);
     setIsDirty(false);
   };
 
-  const handleAddNew = () => {
-    if (isDirty && !window.confirm('Discard unsaved changes?')) return;
+  const handleAddNew = async () => {
+    if (isDirty && !await confirm('Discard unsaved changes?', { confirmLabel: 'Discard' })) return;
     const now = new Date().toISOString();
     const p: PromptVersion = {
       id: generateId(),
@@ -114,9 +116,9 @@ export default function PromptLibrary() {
     toast('Prompt set as active', 'success');
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!selected) return;
-    if (!window.confirm(`Delete "${selected.title}"? This cannot be undone.`)) return;
+    if (!await confirm(`Delete "${selected.title}"? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' })) return;
     deletePrompt(selected.id);
     dbDeletePrompt(selected.id);
     setSelectedId(null);
