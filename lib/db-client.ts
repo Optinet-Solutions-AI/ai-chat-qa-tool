@@ -3,15 +3,19 @@
  * All calls are proxied through /api/db so Supabase credentials
  * never leave the server. Fire-and-forget: errors are logged, never thrown.
  */
-import type { Conversation, ConversationNote, PromptVersion } from './types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisRun } from './types';
 
 async function call(action: string, payload: unknown): Promise<void> {
   try {
-    await fetch('/api/db', {
+    const res = await fetch('/api/db', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
     });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[db-client] ${action} failed (${res.status}):`, text);
+    }
   } catch (e) {
     console.error('[db-client]', action, e);
   }
@@ -43,6 +47,10 @@ export const dbDeleteConversation  = (id: string)                    => call('de
 export const dbInsertNote = (convId: string, note: ConversationNote) => call('insertNote', { convId, note });
 export const dbUpdateNote = (note: ConversationNote)                  => call('updateNote', note);
 export const dbDeleteNote = (id: string)                              => call('deleteNote', { id });
+
+// ── Analysis Runs ──────────────────────────────────────────────────────────
+
+export const dbInsertAnalysisRun = (run: AnalysisRun) => call('insertAnalysisRun', run);
 
 // ── Prompts ────────────────────────────────────────────────────────────────
 

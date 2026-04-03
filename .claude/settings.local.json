@@ -4,7 +4,8 @@
       "WebFetch(domain:community.intercom.com)"
     ],
     "additionalDirectories": [
-      "c:\\Users\\Chris-Optinet\\ai-chat-qa-tool\\app\\conversations"
+      "c:\\Users\\Chris-Optinet\\ai-chat-qa-tool\\app\\conversations",
+      "c:\\Users\\Chris-Optinet\\ai-chat-qa-tool\\app\\analysis-history"
     ]
   }
 }

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
 import { generateId, fmtTime, fmtSeconds } from '@/lib/utils';
-import { dbInsertConversation } from '@/lib/db-client';
+import { dbInsertConversation, dbUpdateConversation } from '@/lib/db-client';
 import type { ConversationFetchResult, Conversation } from '@/lib/types';
 
 interface Props { onClose: () => void }
@@ -27,7 +27,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function AddConversationModal({ onClose }: Props) {
-  const { addConversation } = useStore();
+  const { conversations, addConversation, updateConversation } = useStore();
   const { toast } = useToast();
 
   const [intercomId, setIntercomId] = useState('');
@@ -55,10 +55,20 @@ export default function AddConversationModal({ onClose }: Props) {
   const handleSave = () => {
     if (!preview) return;
     const r = preview;
+
+    // Check for existing conversation with the same Intercom ID
+    const existing = conversations.find((c) => c.intercom_id === r.intercom_id);
+    if (existing) {
+      const confirmed = window.confirm(
+        `A conversation with Intercom ID "${r.intercom_id}" already exists.\n\nOverwriting will refresh all data from Intercom but keep existing notes and analysis history.\n\nContinue?`
+      );
+      if (!confirmed) return;
+    }
+
     const conv: Conversation = {
-      id: generateId(),
+      id: existing?.id ?? generateId(),
       title: r.player_name ? `${r.player_name}${r.ai_subject ? ` — ${r.ai_subject}` : ''}` : `Conv ${r.intercom_id}`,
-      analyzed_at: new Date().toISOString(),
+      analyzed_at: existing?.analyzed_at ?? new Date().toISOString(),
 
       intercom_id: r.intercom_id,
       intercom_created_at: r.intercom_created_at,
@@ -105,25 +115,34 @@ export default function AddConversationModal({ onClose }: Props) {
       median_time_to_reply: r.median_time_to_reply,
       count_reopens: r.count_reopens,
 
-      sentiment: null,
-      summary: null,
-      dissatisfaction_severity: null,
-      issue_category: null,
-      resolution_status: null,
-      language: null,
-      agent_performance_score: null,
-      agent_performance_notes: null,
-      key_quotes: null,
-      recommended_action: null,
-      is_alert_worthy: false,
-      alert_reason: null,
+      sentiment: existing?.sentiment ?? null,
+      summary: existing?.summary ?? null,
+      dissatisfaction_severity: existing?.dissatisfaction_severity ?? null,
+      issue_category: existing?.issue_category ?? null,
+      resolution_status: existing?.resolution_status ?? null,
+      language: existing?.language ?? null,
+      agent_performance_score: existing?.agent_performance_score ?? null,
+      agent_performance_notes: existing?.agent_performance_notes ?? null,
+      key_quotes: existing?.key_quotes ?? null,
+      recommended_action: existing?.recommended_action ?? null,
+      is_alert_worthy: existing?.is_alert_worthy ?? false,
+      alert_reason: existing?.alert_reason ?? null,
 
       original_text: r.transcript,
-      notes: [],
+      last_prompt_id: existing?.last_prompt_id ?? null,
+      last_prompt_content: existing?.last_prompt_content ?? null,
+      notes: existing?.notes ?? [],
     };
-    addConversation(conv);
-    dbInsertConversation(conv);
-    toast('Conversation saved', 'success');
+
+    if (existing) {
+      updateConversation(conv);
+      dbUpdateConversation(conv);
+      toast('Conversation updated', 'success');
+    } else {
+      addConversation(conv);
+      dbInsertConversation(conv);
+      toast('Conversation saved', 'success');
+    }
     onClose();
   };
 

@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Conversation, ConversationNote, PromptVersion, AnalysisResult } from '@/lib/types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisResult, AnalysisRun } from '@/lib/types';
 import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
 import { generateId, fmtTime, fmtSeconds } from '@/lib/utils';
-import { dbDeleteConversation, dbInsertNote, dbUpdateNote, dbDeleteNote } from '@/lib/db-client';
+import { dbDeleteConversation, dbInsertNote, dbUpdateNote, dbDeleteNote, dbUpdateConversation, dbInsertAnalysisRun } from '@/lib/db-client';
 import AnalysisResultView from '@/components/conversations/AnalysisResultView';
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -152,11 +152,15 @@ type PanelId = 'player' | 'conversation' | 'transcript' | 'notes' | 'prompt' | '
 
 interface Props {
   conversation: Conversation;
+  /** When viewing a historical run, pre-populate prompt + analysis from this run */
+  analysisRun?: AnalysisRun;
+  /** Hide Run QA / Delete actions when viewing a read-only historical run */
+  readOnly?: boolean;
 }
 
-export default function ConversationDetail({ conversation }: Props) {
+export default function ConversationDetail({ conversation, analysisRun, readOnly = false }: Props) {
   const router = useRouter();
-  const { deleteConversation, addNote, updateNote, deleteNote, currentUser, prompts } = useStore();
+  const { deleteConversation, updateConversation, addNote, updateNote, deleteNote, currentUser, prompts } = useStore();
   const { toast } = useToast();
 
   const conv = conversation;
@@ -194,14 +198,57 @@ export default function ConversationDetail({ conversation }: Props) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
-  // Init: pick default prompt from store
+  // Init: use analysisRun if provided (history view), else restore last saved, else default prompt
   useEffect(() => {
-    const def = prompts.find((p) => p.is_active) ?? null;
-    if (def) {
-      setSelectedPrompt(def);
-      setPromptContent(def.content);
+    if (analysisRun) {
+      // History view — pre-populate from the specific run
+      const runPrompt = prompts.find((p) => p.id === analysisRun.prompt_id) ?? null;
+      setSelectedPrompt(runPrompt);
+      setPromptContent(analysisRun.prompt_content);
+      setAnalysisResult({
+        language: analysisRun.language ?? '',
+        summary: analysisRun.summary ?? '',
+        dissatisfaction_severity: analysisRun.dissatisfaction_severity ?? '',
+        issue_category: analysisRun.issue_category ?? '',
+        resolution_status: analysisRun.resolution_status ?? '',
+        key_quotes: analysisRun.key_quotes ?? '',
+        agent_performance_score: analysisRun.agent_performance_score,
+        agent_performance_notes: analysisRun.agent_performance_notes ?? '',
+        recommended_action: analysisRun.recommended_action ?? '',
+        is_alert_worthy: analysisRun.is_alert_worthy,
+        alert_reason: analysisRun.alert_reason,
+      });
+      return;
     }
-  }, [prompts]);
+
+    // Live conversation view — restore last saved prompt
+    if (conv.last_prompt_content) {
+      const saved = prompts.find((p) => p.id === conv.last_prompt_id) ?? null;
+      setSelectedPrompt(saved);
+      setPromptContent(conv.last_prompt_content);
+    } else {
+      const def = prompts.find((p) => p.is_active) ?? null;
+      if (def) { setSelectedPrompt(def); setPromptContent(def.content); }
+    }
+
+    // Restore last saved analysis
+    if (conv.summary !== null || conv.resolution_status !== null) {
+      setAnalysisResult({
+        language: conv.language ?? '',
+        summary: conv.summary ?? '',
+        dissatisfaction_severity: conv.dissatisfaction_severity ?? '',
+        issue_category: conv.issue_category ?? '',
+        resolution_status: conv.resolution_status ?? '',
+        key_quotes: conv.key_quotes ?? '',
+        agent_performance_score: conv.agent_performance_score,
+        agent_performance_notes: conv.agent_performance_notes ?? '',
+        recommended_action: conv.recommended_action ?? '',
+        is_alert_worthy: conv.is_alert_worthy,
+        alert_reason: conv.alert_reason,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv.id, analysisRun?.id]);
 
   // Close prompt picker on outside click
   useEffect(() => {
@@ -252,6 +299,52 @@ export default function ConversationDetail({ conversation }: Props) {
       const data: AnalysisResult = await res.json();
       setAnalysisResult(data);
       setShownPanels(new Set(['transcript', 'prompt', 'analysis']));
+
+      // Persist analysis + prompt used back to the conversation
+      const updated = {
+        ...conv,
+        language: data.language ?? null,
+        summary: data.summary ?? null,
+        dissatisfaction_severity: (data.dissatisfaction_severity as Conversation['dissatisfaction_severity']) ?? null,
+        issue_category: data.issue_category ?? null,
+        resolution_status: (data.resolution_status as Conversation['resolution_status']) ?? null,
+        key_quotes: data.key_quotes ?? null,
+        agent_performance_score: data.agent_performance_score ?? null,
+        agent_performance_notes: data.agent_performance_notes ?? null,
+        recommended_action: data.recommended_action ?? null,
+        is_alert_worthy: data.is_alert_worthy,
+        alert_reason: data.alert_reason ?? null,
+        last_prompt_id: selectedPrompt?.id ?? null,
+        last_prompt_content: promptContent,
+        analyzed_at: new Date().toISOString(),
+      };
+      updateConversation(updated);
+      dbUpdateConversation(updated);
+
+      // Insert analysis run log
+      const run: AnalysisRun = {
+        id: generateId(),
+        conversation_id: conv.id,
+        conversation_title: conv.title,
+        player_name: conv.player_name,
+        analyzed_at: updated.analyzed_at,
+        prompt_id: selectedPrompt?.id ?? null,
+        prompt_title: selectedPrompt?.title ?? null,
+        prompt_content: promptContent,
+        language: data.language ?? null,
+        summary: data.summary ?? null,
+        dissatisfaction_severity: data.dissatisfaction_severity ?? null,
+        issue_category: data.issue_category ?? null,
+        resolution_status: data.resolution_status ?? null,
+        key_quotes: data.key_quotes ?? null,
+        agent_performance_score: data.agent_performance_score ?? null,
+        agent_performance_notes: data.agent_performance_notes ?? null,
+        recommended_action: data.recommended_action ?? null,
+        is_alert_worthy: data.is_alert_worthy,
+        alert_reason: data.alert_reason ?? null,
+      };
+      dbInsertAnalysisRun(run);
+
       toast('QA analysis complete', 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -476,7 +569,7 @@ export default function ConversationDetail({ conversation }: Props) {
   );
 
   const promptContent_ = (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 h-full">
       {!selectedPrompt ? (
         <div className="text-center py-6">
           <p className="text-sm text-slate-500 mb-1">No prompt selected.</p>
@@ -496,8 +589,7 @@ export default function ConversationDetail({ conversation }: Props) {
           <textarea
             value={promptContent}
             onChange={(e) => { setPromptContent(e.target.value); setPromptDirty(true); }}
-            rows={10}
-            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+            className="w-full flex-1 min-h-0 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed h-full"
             placeholder="Write or paste your system prompt…"
           />
         </>
@@ -621,31 +713,35 @@ export default function ConversationDetail({ conversation }: Props) {
             })}
           </div>
 
-          <div className="w-px h-4 bg-slate-200" />
+          {!readOnly && (
+            <>
+              <div className="w-px h-4 bg-slate-200" />
 
-          {/* Run QA */}
-          <button
-            onClick={handleRunQA}
-            disabled={isAnalyzing || !conv.intercom_id}
-            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
-            title={!conv.intercom_id ? 'No Intercom ID for this conversation' : 'Run QA analysis'}
-          >
-            {isAnalyzing ? (
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <IconPlay />
-            )}
-            <span className="hidden sm:inline">{isAnalyzing ? 'Analyzing…' : 'Run QA'}</span>
-          </button>
+              {/* Run QA */}
+              <button
+                onClick={handleRunQA}
+                disabled={isAnalyzing || !conv.intercom_id}
+                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+                title={!conv.intercom_id ? 'No Intercom ID for this conversation' : 'Run QA analysis'}
+              >
+                {isAnalyzing ? (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <IconPlay />
+                )}
+                <span className="hidden sm:inline">{isAnalyzing ? 'Analyzing…' : 'Run QA'}</span>
+              </button>
 
-          {/* Delete */}
-          <button
-            onClick={handleDelete}
-            className="flex items-center gap-1.5 text-red-500 hover:text-red-700 transition-colors text-sm font-medium px-2.5 py-1.5 rounded-lg hover:bg-red-50"
-          >
-            <IconTrash />
-            <span className="hidden sm:inline">Delete</span>
-          </button>
+              {/* Delete */}
+              <button
+                onClick={handleDelete}
+                className="flex items-center gap-1.5 text-red-500 hover:text-red-700 transition-colors text-sm font-medium px-2.5 py-1.5 rounded-lg hover:bg-red-50"
+              >
+                <IconTrash />
+                <span className="hidden sm:inline">Delete</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Panel grid */}

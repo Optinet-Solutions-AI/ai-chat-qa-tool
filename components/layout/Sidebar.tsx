@@ -27,6 +27,14 @@ function IconDocument() {
   );
 }
 
+function IconHistory() {
+  return (
+    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
 function IconChevronLeft() {
   return (
     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -46,6 +54,7 @@ function IconChevronRight() {
 const NAV_ITEMS = [
   { href: '/', label: 'Conversations', icon: <IconChat /> },
   { href: '/prompts', label: 'Prompt Library', icon: <IconDocument /> },
+  { href: '/analysis-history', label: 'Analysis History', icon: <IconHistory /> },
 ];
 
 export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, onToggleCollapse }: SidebarProps) {
@@ -54,7 +63,7 @@ export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, o
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/' || pathname.startsWith('/conversations/');
-    return pathname.startsWith(href);
+    return pathname === href || pathname.startsWith(href + '/');
   };
 
   return (

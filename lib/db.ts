@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Conversation, ConversationNote, PromptVersion } from './types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisRun } from './types';
 
 // ── Conversations ──────────────────────────────────────────────────────────
 
@@ -68,35 +68,27 @@ function conversationRow(c: Conversation) {
     alert_reason: c.alert_reason,
 
     original_text: c.original_text,
+    last_prompt_id: c.last_prompt_id,
+    last_prompt_content: c.last_prompt_content,
   };
 }
 
 export async function dbInsertConversation(c: Conversation): Promise<void> {
-  try {
-    const { error } = await supabase.from('conversations').insert(conversationRow(c));
-    if (error) console.error('[db] insert conversation:', error.message);
-  } catch (e) {
-    console.error('[db] insert conversation exception:', e);
-  }
+  const { error } = await supabase.from('conversations').insert(conversationRow(c));
+  if (error) throw new Error(`[db] insert conversation: ${error.message} (code: ${error.code}, details: ${error.details})`);
 }
 
 export async function dbUpdateConversation(c: Conversation): Promise<void> {
-  try {
-    const { id, ...row } = conversationRow(c);
-    const { error } = await supabase.from('conversations').update(row).eq('id', id);
-    if (error) console.error('[db] update conversation:', error.message);
-  } catch (e) {
-    console.error('[db] update conversation exception:', e);
-  }
+  const { id, ...row } = conversationRow(c);
+  const { error } = await supabase.from('conversations').update(row).eq('id', id);
+  if (error) throw new Error(`[db] update conversation: ${error.message}`);
 }
 
 export async function dbDeleteConversation(id: string): Promise<void> {
-  try {
-    const { error } = await supabase.from('conversations').delete().eq('id', id);
-    if (error) console.error('[db] delete conversation:', error.message);
-  } catch (e) {
-    console.error('[db] delete conversation exception:', e);
-  }
+  // Delete analysis runs first (no FK cascade configured)
+  await supabase.from('analysis_runs').delete().eq('conversation_id', id);
+  const { error } = await supabase.from('conversations').delete().eq('id', id);
+  if (error) throw new Error(`[db] delete conversation: ${error.message}`);
 }
 
 // ── Notes ──────────────────────────────────────────────────────────────────
@@ -190,6 +182,35 @@ export async function dbActivatePrompt(id: string): Promise<void> {
   }
 }
 
+// ── Analysis Runs ──────────────────────────────────────────────────────────
+
+export async function dbInsertAnalysisRun(run: AnalysisRun): Promise<void> {
+  const { error } = await supabase.from('analysis_runs').insert(run);
+  if (error) throw new Error(`[db] insert analysis run: ${error.message} (code: ${error.code})`);
+}
+
+export async function loadAnalysisRuns(page = 0, perPage = 25): Promise<{ runs: AnalysisRun[]; total: number }> {
+  const from = page * perPage;
+  const to = from + perPage - 1;
+  const { data, error, count } = await supabase
+    .from('analysis_runs')
+    .select('*', { count: 'exact' })
+    .order('analyzed_at', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`[db] load analysis runs: ${error.message}`);
+  return { runs: (data ?? []) as AnalysisRun[], total: count ?? 0 };
+}
+
+export async function loadAnalysisRun(id: string): Promise<AnalysisRun | null> {
+  const { data, error } = await supabase
+    .from('analysis_runs')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data as AnalysisRun;
+}
+
 // ── Load all state ─────────────────────────────────────────────────────────
 
 export async function loadFromSupabase(): Promise<{ conversations: Conversation[]; prompts: PromptVersion[] } | null> {
@@ -266,6 +287,8 @@ export async function loadFromSupabase(): Promise<{ conversations: Conversation[
       alert_reason: c.alert_reason ?? null,
 
       original_text: c.original_text ?? null,
+      last_prompt_id: c.last_prompt_id ?? null,
+      last_prompt_content: c.last_prompt_content ?? null,
       notes: !cnRes.error
         ? (cnRes.data ?? [])
             .filter((n) => n.conversation_id === c.id)

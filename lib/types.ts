@@ -92,6 +92,10 @@ export interface Conversation {
   is_alert_worthy: boolean;
   alert_reason: string | null;
 
+  // Last analysis prompt
+  last_prompt_id: string | null;
+  last_prompt_content: string | null;
+
   // Transcript & notes
   original_text: string | null;
   notes: ConversationNote[];
@@ -160,6 +164,31 @@ export interface ConversationFetchResult {
   count_reopens: number | null;
 
   transcript: string;
+}
+
+export interface AnalysisRun {
+  id: string;
+  conversation_id: string;
+  // Denormalised for table display
+  conversation_title: string | null;
+  player_name: string | null;
+  analyzed_at: string;
+  // Prompt used
+  prompt_id: string | null;
+  prompt_title: string | null;
+  prompt_content: string;
+  // Result fields
+  language: string | null;
+  summary: string | null;
+  dissatisfaction_severity: string | null;
+  issue_category: string | null;
+  resolution_status: string | null;
+  key_quotes: string | null;
+  agent_performance_score: number | null;
+  agent_performance_notes: string | null;
+  recommended_action: string | null;
+  is_alert_worthy: boolean;
+  alert_reason: string | null;
 }
 
 export interface AnalysisResult {
