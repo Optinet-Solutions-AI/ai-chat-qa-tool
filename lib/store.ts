@@ -4,7 +4,6 @@ import { create } from 'zustand';
 import type { Conversation, ConversationNote, PromptVersion } from './types';
 import { loadFromSupabase } from './db-client';
 
-const CONV_KEY = 'qa-conv-v1';
 const USER_KEY = 'qa_user';
 
 interface AppState {
@@ -32,10 +31,9 @@ interface AppState {
   activatePrompt: (id: string) => void;
 
   loadState: () => Promise<void>;
-  saveToLocalStorage: () => void;
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set) => ({
   conversations: [],
   prompts: [],
   currentUser: '',
@@ -50,19 +48,16 @@ export const useStore = create<AppState>((set, get) => ({
 
   addConversation: (c) => {
     set((s) => ({ conversations: [c, ...s.conversations] }));
-    get().saveToLocalStorage();
   },
 
   updateConversation: (c) => {
     set((s) => ({
       conversations: s.conversations.map((x) => (x.id === c.id ? c : x)),
     }));
-    get().saveToLocalStorage();
   },
 
   deleteConversation: (id) => {
     set((s) => ({ conversations: s.conversations.filter((x) => x.id !== id) }));
-    get().saveToLocalStorage();
   },
 
   addNote: (convId, note) => {
@@ -71,7 +66,6 @@ export const useStore = create<AppState>((set, get) => ({
         c.id === convId ? { ...c, notes: [...c.notes, note] } : c
       ),
     }));
-    get().saveToLocalStorage();
   },
 
   updateNote: (convId, note) => {
@@ -82,7 +76,6 @@ export const useStore = create<AppState>((set, get) => ({
           : c
       ),
     }));
-    get().saveToLocalStorage();
   },
 
   deleteNote: (convId, noteId) => {
@@ -91,7 +84,6 @@ export const useStore = create<AppState>((set, get) => ({
         c.id === convId ? { ...c, notes: c.notes.filter((n) => n.id !== noteId) } : c
       ),
     }));
-    get().saveToLocalStorage();
   },
 
   addPrompt: (p) => {
@@ -114,41 +106,18 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
-  saveToLocalStorage: () => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(CONV_KEY, JSON.stringify(get().conversations));
-  },
-
   loadState: async () => {
     if (typeof window === 'undefined') return;
 
     const user = localStorage.getItem(USER_KEY) || '';
 
-    // Try Supabase first
     const remote = await loadFromSupabase();
     if (remote) {
-      let conversations = remote.conversations;
-      if (conversations.length === 0) {
-        try {
-          const lc = localStorage.getItem(CONV_KEY);
-          if (lc) conversations = JSON.parse(lc);
-        } catch { /* ignore */ }
-      }
-      set({ conversations, prompts: remote.prompts ?? [], currentUser: user, isLoaded: true });
+      set({ conversations: remote.conversations, prompts: remote.prompts ?? [], currentUser: user, isLoaded: true });
       return;
     }
 
-    // Fallback: localStorage
-    try {
-      const lc = localStorage.getItem(CONV_KEY);
-      set({
-        conversations: lc ? JSON.parse(lc) : [],
-        prompts: [],
-        currentUser: user,
-        isLoaded: true,
-      });
-    } catch {
-      set({ conversations: [], prompts: [], currentUser: user, isLoaded: true });
-    }
+    // Supabase unavailable — start empty
+    set({ conversations: [], prompts: [], currentUser: user, isLoaded: true });
   },
 }));

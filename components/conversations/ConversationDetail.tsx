@@ -230,8 +230,8 @@ export default function ConversationDetail({ conversation }: Props) {
       toast('Select or write a prompt first', 'error');
       return;
     }
-    if (!conv.original_text) {
-      toast('No transcript stored for this conversation', 'error');
+    if (!conv.intercom_id) {
+      toast('No Intercom ID for this conversation', 'error');
       return;
     }
     setIsAnalyzing(true);
@@ -242,8 +242,7 @@ export default function ConversationDetail({ conversation }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customSystemPrompt: promptContent,
-          text: conv.original_text,
-          conversation_id: conv.id,
+          intercomId: conv.intercom_id,
         }),
       });
       if (!res.ok) {
@@ -627,9 +626,9 @@ export default function ConversationDetail({ conversation }: Props) {
           {/* Run QA */}
           <button
             onClick={handleRunQA}
-            disabled={isAnalyzing || !conv.original_text}
+            disabled={isAnalyzing || !conv.intercom_id}
             className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
-            title={!conv.original_text ? 'No transcript stored' : 'Run QA analysis'}
+            title={!conv.intercom_id ? 'No Intercom ID for this conversation' : 'Run QA analysis'}
           >
             {isAnalyzing ? (
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
