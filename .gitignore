@@ -1,6 +1,8 @@
 node_modules/
 package-lock.json
 *.pdf
-*.md
 .env
-config.js
+.env.local
+.env.*.local
+.next/
+out/
