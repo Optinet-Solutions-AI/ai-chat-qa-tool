@@ -207,19 +207,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
       const runPrompt = prompts.find((p) => p.id === analysisRun.prompt_id) ?? null;
       setSelectedPrompt(runPrompt);
       setPromptContent(analysisRun.prompt_content);
-      setAnalysisResult({
-        language: analysisRun.language ?? '',
-        summary: analysisRun.summary ?? '',
-        dissatisfaction_severity: analysisRun.dissatisfaction_severity ?? '',
-        issue_category: analysisRun.issue_category ?? '',
-        resolution_status: analysisRun.resolution_status ?? '',
-        key_quotes: analysisRun.key_quotes ?? '',
-        agent_performance_score: analysisRun.agent_performance_score,
-        agent_performance_notes: analysisRun.agent_performance_notes ?? '',
-        recommended_action: analysisRun.recommended_action ?? '',
-        is_alert_worthy: analysisRun.is_alert_worthy,
-        alert_reason: analysisRun.alert_reason,
-      });
+      if (analysisRun.summary) setAnalysisResult({ analysisText: analysisRun.summary });
       return;
     }
 
@@ -234,20 +222,8 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
     }
 
     // Restore last saved analysis
-    if (conv.summary !== null || conv.resolution_status !== null) {
-      setAnalysisResult({
-        language: conv.language ?? '',
-        summary: conv.summary ?? '',
-        dissatisfaction_severity: conv.dissatisfaction_severity ?? '',
-        issue_category: conv.issue_category ?? '',
-        resolution_status: conv.resolution_status ?? '',
-        key_quotes: conv.key_quotes ?? '',
-        agent_performance_score: conv.agent_performance_score,
-        agent_performance_notes: conv.agent_performance_notes ?? '',
-        recommended_action: conv.recommended_action ?? '',
-        is_alert_worthy: conv.is_alert_worthy,
-        alert_reason: conv.alert_reason,
-      });
+    if (conv.summary) {
+      setAnalysisResult({ analysisText: conv.summary });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv.id, analysisRun?.id]);
@@ -298,27 +274,19 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error ?? 'Analysis failed');
       }
-      const data: AnalysisResult = await res.json();
-      setAnalysisResult(data);
+      const data: AnalysisResult & Record<string, unknown> = await res.json();
+      setAnalysisResult({ analysisText: data.analysisText });
       setShownPanels(new Set(['transcript', 'prompt', 'analysis']));
+
+      const now = new Date().toISOString();
 
       // Persist analysis + prompt used back to the conversation
       const updated = {
         ...conv,
-        language: data.language ?? null,
-        summary: data.summary ?? null,
-        dissatisfaction_severity: (data.dissatisfaction_severity as Conversation['dissatisfaction_severity']) ?? null,
-        issue_category: data.issue_category ?? null,
-        resolution_status: (data.resolution_status as Conversation['resolution_status']) ?? null,
-        key_quotes: data.key_quotes ?? null,
-        agent_performance_score: data.agent_performance_score ?? null,
-        agent_performance_notes: data.agent_performance_notes ?? null,
-        recommended_action: data.recommended_action ?? null,
-        is_alert_worthy: data.is_alert_worthy,
-        alert_reason: data.alert_reason ?? null,
+        summary: data.analysisText,
         last_prompt_id: selectedPrompt?.id ?? null,
         last_prompt_content: promptContent,
-        analyzed_at: new Date().toISOString(),
+        analyzed_at: now,
       };
       updateConversation(updated);
       dbUpdateConversation(updated);
@@ -329,21 +297,21 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
         conversation_id: conv.id,
         conversation_title: conv.title,
         player_name: conv.player_name,
-        analyzed_at: updated.analyzed_at,
+        analyzed_at: now,
         prompt_id: selectedPrompt?.id ?? null,
         prompt_title: selectedPrompt?.title ?? null,
         prompt_content: promptContent,
-        language: data.language ?? null,
-        summary: data.summary ?? null,
-        dissatisfaction_severity: data.dissatisfaction_severity ?? null,
-        issue_category: data.issue_category ?? null,
-        resolution_status: data.resolution_status ?? null,
-        key_quotes: data.key_quotes ?? null,
-        agent_performance_score: data.agent_performance_score ?? null,
-        agent_performance_notes: data.agent_performance_notes ?? null,
-        recommended_action: data.recommended_action ?? null,
-        is_alert_worthy: data.is_alert_worthy,
-        alert_reason: data.alert_reason ?? null,
+        summary: data.analysisText,
+        language: null,
+        dissatisfaction_severity: null,
+        issue_category: null,
+        resolution_status: null,
+        key_quotes: null,
+        agent_performance_score: null,
+        agent_performance_notes: null,
+        recommended_action: null,
+        is_alert_worthy: false,
+        alert_reason: null,
       };
       dbInsertAnalysisRun(run);
 

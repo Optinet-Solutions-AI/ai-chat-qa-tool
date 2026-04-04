@@ -231,7 +231,7 @@ async function callOpenAI(
   systemPrompt: string,
   userMessage: string,
   openAIKey: string
-): Promise<Record<string, unknown>> {
+): Promise<string> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey}` },
@@ -241,7 +241,6 @@ async function callOpenAI(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
       ],
-      response_format: { type: 'json_object' },
       temperature: 0.3,
     }),
   });
@@ -249,9 +248,7 @@ async function callOpenAI(
   if (!response.ok) throw new Error(data.error?.message || 'OpenAI API error');
   const content = data.choices[0]?.message?.content;
   if (!content) throw new Error('OpenAI returned an empty response.');
-  const match = (content as string).match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Could not find a valid JSON object in the AI response.');
-  return JSON.parse(match[0]) as Record<string, unknown>;
+  return content as string;
 }
 
 // ── GET: fetch conversation data (no AI) ──────────────────────────────────
@@ -302,7 +299,7 @@ export async function POST(req: NextRequest) {
       intercomData.transcript,
     ].join('\n');
     const analysis = await callOpenAI(customSystemPrompt, userMessage, openAIKey);
-    return NextResponse.json({ ...analysis, ...intercomData });
+    return NextResponse.json({ analysisText: analysis, ...intercomData });
   } catch (error) {
     console.error('Analysis Error:', error);
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });

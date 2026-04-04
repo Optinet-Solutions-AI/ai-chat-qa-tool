@@ -82,22 +82,12 @@ export default function BulkAnalysisModal({ conversations, onClose, onComplete }
           throw new Error(e.error ?? 'Analysis failed');
         }
 
-        const data: AnalysisResult = await res.json();
+        const data: AnalysisResult & Record<string, unknown> = await res.json();
         const now = new Date().toISOString();
 
         const updated: Conversation = {
           ...conv,
-          language: data.language ?? null,
-          summary: data.summary ?? null,
-          dissatisfaction_severity: (data.dissatisfaction_severity as Conversation['dissatisfaction_severity']) ?? null,
-          issue_category: data.issue_category ?? null,
-          resolution_status: (data.resolution_status as Conversation['resolution_status']) ?? null,
-          key_quotes: data.key_quotes ?? null,
-          agent_performance_score: data.agent_performance_score ?? null,
-          agent_performance_notes: data.agent_performance_notes ?? null,
-          recommended_action: data.recommended_action ?? null,
-          is_alert_worthy: data.is_alert_worthy,
-          alert_reason: data.alert_reason ?? null,
+          summary: data.analysisText,
           last_prompt_id: selectedPrompt.id,
           last_prompt_content: selectedPrompt.content,
           analyzed_at: now,
@@ -115,17 +105,17 @@ export default function BulkAnalysisModal({ conversations, onClose, onComplete }
           prompt_id: selectedPrompt.id,
           prompt_title: selectedPrompt.title,
           prompt_content: selectedPrompt.content,
-          language: data.language ?? null,
-          summary: data.summary ?? null,
-          dissatisfaction_severity: data.dissatisfaction_severity ?? null,
-          issue_category: data.issue_category ?? null,
-          resolution_status: data.resolution_status ?? null,
-          key_quotes: data.key_quotes ?? null,
-          agent_performance_score: data.agent_performance_score ?? null,
-          agent_performance_notes: data.agent_performance_notes ?? null,
-          recommended_action: data.recommended_action ?? null,
-          is_alert_worthy: data.is_alert_worthy,
-          alert_reason: data.alert_reason ?? null,
+          summary: data.analysisText,
+          language: null,
+          dissatisfaction_severity: null,
+          issue_category: null,
+          resolution_status: null,
+          key_quotes: null,
+          agent_performance_score: null,
+          agent_performance_notes: null,
+          recommended_action: null,
+          is_alert_worthy: false,
+          alert_reason: null,
         };
         dbInsertAnalysisRun(run);
 

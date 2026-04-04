@@ -22,13 +22,6 @@ function IconChevronRight() {
     </svg>
   );
 }
-function IconAlert() {
-  return (
-    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-    </svg>
-  );
-}
 
 function IconTrash() {
   return (
@@ -47,33 +40,20 @@ function fmtDate(iso: string) {
   }).format(new Date(iso));
 }
 
-function ResolutionBadge({ status }: { status: string | null }) {
-  if (!status) return <span className="text-slate-300">—</span>;
-  const colors: Record<string, string> = {
-    Resolved: 'bg-green-100 text-green-700',
-    'Partially Resolved': 'bg-amber-100 text-amber-700',
-    Unresolved: 'bg-red-100 text-red-700',
-  };
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${colors[status] ?? 'bg-slate-100 text-slate-600'}`}>
-      {status}
-    </span>
-  );
-}
+function SummaryPreview({ text }: { text: string | null }) {
+  if (!text) return <span className="text-slate-300">—</span>;
 
-function SeverityBadge({ severity }: { severity: string | null }) {
-  if (!severity) return <span className="text-slate-300">—</span>;
-  const colors: Record<string, string> = {
-    Low: 'bg-blue-100 text-blue-700',
-    Medium: 'bg-amber-100 text-amber-700',
-    High: 'bg-orange-100 text-orange-700',
-    Critical: 'bg-red-100 text-red-700',
-  };
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${colors[severity] ?? 'bg-slate-100 text-slate-600'}`}>
-      {severity}
-    </span>
-  );
+  // Strip code fences and try to extract a summary field from JSON
+  const cleaned = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const candidate = parsed?.summary ?? parsed?.Summary ?? Object.values(parsed).find((v) => typeof v === 'string' && (v as string).length > 20);
+    if (candidate) {
+      return <span className="text-slate-600 line-clamp-2">{String(candidate)}</span>;
+    }
+  } catch { /* not JSON */ }
+
+  return <span className="text-slate-600 line-clamp-2">{cleaned}</span>;
 }
 
 const PER_PAGE = 25;
@@ -184,10 +164,7 @@ export default function AnalysisHistoryPage() {
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Date</th>
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Conversation</th>
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Prompt</th>
-                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Resolution</th>
-                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Severity</th>
-                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Score</th>
-                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Alert</th>
+                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Summary</th>
                     <th className="px-4 py-3 w-10" />
                   </tr>
                 </thead>
@@ -209,26 +186,11 @@ export default function AnalysisHistoryPage() {
                           <p className="text-[11px] text-slate-400 truncate max-w-[180px]">{run.player_name}</p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-500 truncate max-w-[140px]">
+                      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap max-w-[140px] truncate">
                         {run.prompt_title ?? <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-4 py-3">
-                        <ResolutionBadge status={run.resolution_status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <SeverityBadge severity={run.dissatisfaction_severity} />
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-600">
-                        {run.agent_performance_score != null ? run.agent_performance_score : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {run.is_alert_worthy ? (
-                          <span className="inline-flex items-center gap-1 text-red-600 text-[10px] font-semibold">
-                            <IconAlert /> Alert
-                          </span>
-                        ) : (
-                          <span className="text-slate-300 text-xs">—</span>
-                        )}
+                      <td className="px-4 py-3 text-xs max-w-[320px]">
+                        <SummaryPreview text={run.summary} />
                       </td>
                       <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                         <button

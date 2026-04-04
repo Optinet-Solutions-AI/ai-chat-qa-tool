@@ -192,15 +192,5 @@ export interface AnalysisRun {
 }
 
 export interface AnalysisResult {
-  language: string;
-  summary: string;
-  dissatisfaction_severity: string;
-  issue_category: string;
-  resolution_status: string;
-  key_quotes: string;
-  agent_performance_score: number | null;
-  agent_performance_notes: string;
-  recommended_action: string;
-  is_alert_worthy: boolean;
-  alert_reason: string | null;
+  analysisText: string;
 }
