@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:community.intercom.com)"
+      "WebFetch(domain:community.intercom.com)",
+      "Bash(npx tsc:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Chris-Optinet\\ai-chat-qa-tool\\app\\conversations",

@@ -7,7 +7,7 @@ import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
 import { useConfirm } from '@/components/layout/ConfirmProvider';
 import { generateId, fmtTime, fmtSeconds } from '@/lib/utils';
-import { dbDeleteConversation, dbInsertNote, dbUpdateNote, dbDeleteNote, dbUpdateConversation, dbInsertAnalysisRun } from '@/lib/db-client';
+import { dbDeleteConversation, dbInsertNote, dbUpdateNote, dbDeleteNote, dbUpdateConversation, dbInsertAnalysisRun, dbInsertPrompt } from '@/lib/db-client';
 import AnalysisResultView from '@/components/conversations/AnalysisResultView';
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ interface Props {
 
 export default function ConversationDetail({ conversation, analysisRun, readOnly = false }: Props) {
   const router = useRouter();
-  const { deleteConversation, updateConversation, addNote, updateNote, deleteNote, currentUser, prompts } = useStore();
+  const { deleteConversation, updateConversation, addNote, updateNote, deleteNote, addPrompt, currentUser, prompts } = useStore();
   const { toast } = useToast();
   const confirm = useConfirm();
 
@@ -312,6 +312,28 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
       toast('No Intercom ID for this conversation', 'error');
       return;
     }
+
+    // Auto-save edited prompt as a new version before running
+    let effectivePrompt = selectedPrompt;
+    if (promptDirty && promptContent !== selectedPrompt?.content) {
+      const now = new Date().toISOString();
+      const baseTitle = (selectedPrompt?.title ?? 'Prompt').replace(/\s*\(edited\)$/, '').trim();
+      const newVersion: PromptVersion = {
+        id: generateId(),
+        title: `${baseTitle} (edited)`,
+        content: promptContent,
+        is_active: false,
+        created_at: now,
+        updated_at: now,
+      };
+      addPrompt(newVersion);
+      dbInsertPrompt(newVersion);
+      setSelectedPrompt(newVersion);
+      setPromptDirty(false);
+      effectivePrompt = newVersion;
+      toast(`Saved as "${newVersion.title}"`, 'info');
+    }
+
     setIsAnalyzing(true);
     setAnalysisResult(null);
     try {
@@ -337,7 +359,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
       const updated = {
         ...conv,
         summary: data.analysisText,
-        last_prompt_id: selectedPrompt?.id ?? null,
+        last_prompt_id: effectivePrompt?.id ?? null,
         last_prompt_content: promptContent,
         analyzed_at: now,
       };
@@ -351,8 +373,8 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
         conversation_title: conv.title,
         player_name: conv.player_name,
         analyzed_at: now,
-        prompt_id: selectedPrompt?.id ?? null,
-        prompt_title: selectedPrompt?.title ?? null,
+        prompt_id: effectivePrompt?.id ?? null,
+        prompt_title: effectivePrompt?.title ?? null,
         prompt_content: promptContent,
         summary: data.analysisText,
         language: null,
