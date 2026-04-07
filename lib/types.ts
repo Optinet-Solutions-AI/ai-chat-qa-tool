@@ -194,3 +194,16 @@ export interface AnalysisRun {
 export interface AnalysisResult {
   analysisText: string;
 }
+
+export type SyncStatus = 'running' | 'done' | 'cancelled' | 'error';
+
+export interface SyncJob {
+  id: string;           // date string "YYYY-MM-DD" — one job per date
+  status: SyncStatus;
+  total: number;
+  done: number;
+  error_count: number;
+  started_at: string;
+  finished_at: string | null;
+  error_message: string | null;
+}

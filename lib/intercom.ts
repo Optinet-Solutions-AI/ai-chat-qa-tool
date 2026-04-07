@@ -54,6 +54,35 @@ interface IntercomContact {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Fetch with automatic 429 back-off retry.
+ * On rate limit: waits until the reset time reported by Intercom, then retries.
+ */
+async function fetchWithRateLimit(
+  url: string,
+  options: RequestInit = {},
+  maxRetries = 4,
+): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status !== 429) return res;
+    if (attempt === maxRetries) return res; // let caller handle final 429
+
+    const reset = res.headers.get('X-RateLimit-Reset');
+    const waitMs = reset
+      ? Math.max(1000, parseInt(reset, 10) * 1000 - Date.now() + 500)
+      : (attempt + 1) * 3000;
+
+    console.warn(`[intercom] Rate limited (${url}). Waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${maxRetries}…`);
+    await sleep(waitMs);
+  }
+  return fetch(url, options);
+}
+
 export function stripHtml(html: string): string {
   return (html || '').replace(/<[^>]*>?/gm, '').trim();
 }
@@ -136,7 +165,7 @@ export async function searchConversationsByDate(
       pagination: { per_page: 150, ...(cursor ? { starting_after: cursor } : {}) },
     };
 
-    const res = await fetch('https://api.intercom.io/conversations/search', {
+    const res = await fetchWithRateLimit('https://api.intercom.io/conversations/search', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -179,7 +208,7 @@ export async function fetchIntercomData(
 ): Promise<ConversationFetchResult> {
   const headers = intercomHeaders(apiKey);
 
-  const convRes = await fetch(`https://api.intercom.io/conversations/${intercomId}`, { headers });
+  const convRes = await fetchWithRateLimit(`https://api.intercom.io/conversations/${intercomId}`, { headers });
   if (convRes.status === 429) throw new Error(`Intercom rate limit reached. ${rateLimitResetMsg(convRes)}`);
   if (!convRes.ok) {
     const body = await convRes.text();
@@ -213,11 +242,11 @@ export async function fetchIntercomData(
 
   if (player.id && remaining >= 5) {
     const [contactRes, tagsRes, companiesRes, segmentsRes, eventsRes] = await Promise.allSettled([
-      fetch(`https://api.intercom.io/contacts/${player.id}`, { headers }),
-      fetch(`https://api.intercom.io/contacts/${player.id}/tags`, { headers }),
-      fetch(`https://api.intercom.io/contacts/${player.id}/companies`, { headers }),
-      fetch(`https://api.intercom.io/contacts/${player.id}/segments`, { headers }),
-      fetch(`https://api.intercom.io/events?type=user&intercom_user_id=${player.id}&summary=true`, { headers }),
+      fetchWithRateLimit(`https://api.intercom.io/contacts/${player.id}`, { headers }),
+      fetchWithRateLimit(`https://api.intercom.io/contacts/${player.id}/tags`, { headers }),
+      fetchWithRateLimit(`https://api.intercom.io/contacts/${player.id}/companies`, { headers }),
+      fetchWithRateLimit(`https://api.intercom.io/contacts/${player.id}/segments`, { headers }),
+      fetchWithRateLimit(`https://api.intercom.io/events?type=user&intercom_user_id=${player.id}&summary=true`, { headers }),
     ]);
 
     if (contactRes.status === 'fulfilled') contact = await safeJson<IntercomContact>(contactRes.value);

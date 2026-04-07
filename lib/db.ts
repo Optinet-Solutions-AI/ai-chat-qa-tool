@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Conversation, ConversationNote, PromptVersion, AnalysisRun } from './types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob } from './types';
 import { cestDateToUnixRange } from './intercom';
 
 // ── Shared row mapper ──────────────────────────────────────────────────────
@@ -358,4 +358,22 @@ export async function loadFromSupabase(): Promise<{ conversations: Conversation[
     console.error('[db] loadFromSupabase failed:', e);
     return null;
   }
+}
+
+// ── Sync Jobs ──────────────────────────────────────────────────────────────
+
+export async function dbGetSyncJob(date: string): Promise<SyncJob | null> {
+  const { data, error } = await supabase.from('sync_jobs').select('*').eq('id', date).single();
+  if (error || !data) return null;
+  return data as SyncJob;
+}
+
+export async function dbUpsertSyncJob(job: SyncJob): Promise<void> {
+  const { error } = await supabase.from('sync_jobs').upsert(job, { onConflict: 'id' });
+  if (error) throw new Error(`[db] upsert sync job: ${error.message}`);
+}
+
+export async function dbUpdateSyncJob(date: string, patch: Partial<SyncJob>): Promise<void> {
+  const { error } = await supabase.from('sync_jobs').update(patch).eq('id', date);
+  if (error) throw new Error(`[db] update sync job: ${error.message}`);
 }
