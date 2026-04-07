@@ -194,6 +194,16 @@ export async function dbDeleteAnalysisRun(id: string): Promise<void> {
   if (error) throw new Error(`[db] delete analysis run: ${error.message}`);
 }
 
+export async function getExistingIntercomIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('intercom_id')
+    .in('intercom_id', ids);
+  if (error) return new Set();
+  return new Set((data ?? []).map((r) => r.intercom_id).filter(Boolean));
+}
+
 export async function loadAnalysisRuns(page = 0, perPage = 25): Promise<{ runs: AnalysisRun[]; total: number }> {
   const from = page * perPage;
   const to = from + perPage - 1;
