@@ -313,6 +313,24 @@ export async function loadConversationsByDate(
   };
 }
 
+export async function loadConversations(
+  page = 0,
+  perPage = 24,
+): Promise<{ conversations: Conversation[]; total: number }> {
+  const from = page * perPage;
+  const to = from + perPage - 1;
+  const { data, error, count } = await supabase
+    .from('conversations')
+    .select('*', { count: 'exact' })
+    .order('analyzed_at', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`[db] loadConversations: ${error.message}`);
+  return {
+    conversations: (data ?? []).map((c) => mapConversationRow(c)),
+    total: count ?? 0,
+  };
+}
+
 export async function loadAnalysisRun(id: string): Promise<AnalysisRun | null> {
   const { data, error } = await supabase
     .from('analysis_runs')

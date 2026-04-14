@@ -1,0 +1,14 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { loadConversations } from '@/lib/db';
+
+export async function GET(req: NextRequest) {
+  const page = parseInt(req.nextUrl.searchParams.get('page') ?? '0', 10);
+  const perPage = parseInt(req.nextUrl.searchParams.get('perPage') ?? '24', 10);
+  try {
+    const result = await loadConversations(page, perPage);
+    return NextResponse.json(result);
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}
