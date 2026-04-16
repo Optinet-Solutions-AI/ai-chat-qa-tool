@@ -420,3 +420,49 @@ export async function PATCH(req: NextRequest) {
     resumed_from: startAt,
   });
 }
+
+// ── DELETE: cancel an active batch job ────────────────────────────────────
+//
+// Body: { batchJobId: string }
+// Calls OpenAI's cancel endpoint, then updates our DB record to 'cancelling'.
+
+export async function DELETE(req: NextRequest) {
+  const openAIKey = process.env.OPENAI_API_KEY;
+  if (!openAIKey) return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
+
+  let body: { batchJobId?: string };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
+
+  const { batchJobId } = body;
+  if (!batchJobId) return NextResponse.json({ error: 'batchJobId is required' }, { status: 400 });
+
+  const job = await dbGetBatchJobById(batchJobId);
+  if (!job) return NextResponse.json({ error: 'Batch job not found' }, { status: 404 });
+
+  const cancellableStatuses: BatchJobStatus[] = ['validating', 'in_progress', 'finalizing'];
+  if (!cancellableStatuses.includes(job.status)) {
+    return NextResponse.json({ error: `Job cannot be cancelled (status: ${job.status})` }, { status: 400 });
+  }
+
+  if (!job.openai_batch_id) {
+    return NextResponse.json({ error: 'No OpenAI batch ID on record' }, { status: 400 });
+  }
+
+  const res = await fetch(`https://api.openai.com/v1/batches/${job.openai_batch_id}/cancel`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${openAIKey}` },
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    return NextResponse.json(
+      { error: `OpenAI cancel failed: ${data?.error?.message ?? res.status}` },
+      { status: 500 },
+    );
+  }
+
+  await dbUpdateBatchJob(batchJobId, { status: 'cancelling' });
+
+  return NextResponse.json({ success: true });
+}

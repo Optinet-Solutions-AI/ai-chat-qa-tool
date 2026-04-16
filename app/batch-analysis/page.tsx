@@ -113,6 +113,7 @@ export default function BatchAnalysisPage() {
 
   const [importingJobId, setImportingJobId] = useState<string | null>(null);
   const [importResults, setImportResults] = useState<Record<string, { imported: number; failed: number; resumed_from: number }>>({});
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [tabInitialised, setTabInitialised] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -217,6 +218,27 @@ export default function BatchAnalysisPage() {
       alert((e as Error).message);
     } finally {
       setImportingJobId(null);
+    }
+  };
+
+  // ── Cancel job ─────────────────────────────────────────────────────────
+
+  const handleCancel = async (job: BatchJob) => {
+    if (!confirm(`Cancel this batch job (${job.total_conversations.toLocaleString()} conversations)?`)) return;
+    setCancellingJobId(job.id);
+    try {
+      const res = await fetch('/api/batch-analysis', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchJobId: job.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Cancel failed');
+      await fetchJobs(true);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setCancellingJobId(null);
     }
   };
 
@@ -496,6 +518,19 @@ export default function BatchAnalysisPage() {
                     <span className="text-xs text-amber-400/80 shrink-0">
                       Resume from {job.imported_count.toLocaleString()}
                     </span>
+                  )}
+
+                  {/* Cancel button — only for active jobs */}
+                  {ACTIVE_STATUSES.has(job.status) && (
+                    <button
+                      onClick={() => handleCancel(job)}
+                      disabled={cancellingJobId === job.id}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-400 border border-red-400/30 hover:bg-red-400/10 disabled:opacity-50 rounded-lg transition-colors"
+                    >
+                      {cancellingJobId === job.id
+                        ? <><div className="w-3 h-3 border border-red-400/30 border-t-red-400 rounded-full animate-spin" />Cancelling…</>
+                        : 'Cancel'}
+                    </button>
                   )}
                 </div>
 

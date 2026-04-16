@@ -493,7 +493,8 @@ export async function getUnanalyzedConversations(): Promise<MinimalConversation[
     .from('conversations')
     .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
     .is('summary', null)
-    .not('original_text', 'is', null);
+    .not('original_text', 'is', null)
+    .limit(60000);
   if (error) throw new Error(`[db] get unanalyzed conversations: ${error.message}`);
   return (data ?? []) as MinimalConversation[];
 }
