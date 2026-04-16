@@ -11,6 +11,10 @@ import {
 import type { BatchJob, BatchJobStatus } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 
+// Allow up to 5 minutes — fetching 26k+ rows in pages + uploading to OpenAI
+// takes well over the default 10s Vercel limit.
+export const maxDuration = 300;
+
 // ── Rate-limit / size guards ───────────────────────────────────────────────
 // OpenAI Batch API limits: 50k requests per file, 100 MB per file.
 // Each conversation at ~5-8 KB of JSONL → 10k requests ≈ 50-80 MB, safely
