@@ -513,12 +513,6 @@ export default function BatchAnalysisPage() {
                     </button>
                   )}
 
-                  {/* Resume import indicator */}
-                  {job.status === 'completed' && !alreadyImported && job.imported_count > 0 && (
-                    <span className="text-xs text-amber-400/80 shrink-0">
-                      Resume from {job.imported_count.toLocaleString()}
-                    </span>
-                  )}
 
                   {/* Cancel button — only for active jobs */}
                   {ACTIVE_STATUSES.has(job.status) && (
@@ -563,6 +557,9 @@ export default function BatchAnalysisPage() {
                         style={{ width: `${pct(job.imported_count, total)}%` }}
                       />
                     </div>
+                    {!alreadyImported && (
+                      <p className="text-xs text-amber-400/60 mt-1.5">Resume from {job.imported_count.toLocaleString()}</p>
+                    )}
                   </div>
                 )}
 
