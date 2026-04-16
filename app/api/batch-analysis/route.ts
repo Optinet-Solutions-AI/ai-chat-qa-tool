@@ -7,8 +7,8 @@ import {
   dbUpdateBatchJob,
   dbGetBatchJobs,
   dbGetBatchJobById,
-  dbUpdateAnalysisFields,
-  dbInsertAnalysisRun,
+  dbBatchUpdateAnalysisFields,
+  dbBatchInsertAnalysisRuns,
   getConversationMetadataBatch,
   type MinimalConversation,
 } from '@/lib/db';
@@ -156,10 +156,11 @@ function mapOpenAIStatus(s: string): BatchJobStatus {
 // Strategy:
 //  1. Query conversations WHERE summary IS NULL — skips already-analyzed rows
 //     automatically, so re-submitting after a partial failure is safe.
-//  2. Build JSONL and chunk into ≤10k-request / ≤90 MB pieces.
-//  3. Upload each chunk as a separate OpenAI batch job saved to `batch_jobs`.
-//     Multiple concurrent batch jobs let OpenAI parallelize processing while
-//     keeping each file within the enqueued-token limits for Tier-1 keys.
+//  2. Fetch Supabase pages of 1k rows (Supabase's default max_rows cap) and
+//     accumulate them into a buffer. Flush the buffer to one OpenAI batch job
+//     every MAX_REQUESTS_PER_CHUNK (10k) rows — so 23k conversations → 3 jobs,
+//     not 23.
+//  3. Each OpenAI batch file is ≤10k requests and ≤90 MB.
 
 export async function POST(req: NextRequest) {
   try {
@@ -198,37 +199,28 @@ async function _POST(req: NextRequest) {
     ? Math.min(testLimit, totalAvailable)
     : totalAvailable;
 
-  // Step 2 — process one page at a time (MAX_REQUESTS_PER_CHUNK rows per page).
-  // Each page is fetched, converted to JSONL, and uploaded to OpenAI before the
-  // next page is loaded — keeping peak memory to ~1 page instead of the full set.
+  // Step 2 — fetch Supabase pages (capped at 1k rows each by Supabase's default
+  // max_rows limit) and accumulate them into a buffer. Only submit one OpenAI
+  // batch job per MAX_REQUESTS_PER_CHUNK rows so we create ~3 batches for 23k
+  // conversations instead of 23 separate 1k batches.
+  const SUPABASE_PAGE_SIZE = 1_000;
   const now = new Date().toISOString();
   const createdJobs: BatchJob[] = [];
   let from = 0;
   let chunkIndex = 0;
+  let buffer: MinimalConversation[] = [];
 
-  while (from < effectiveTotal) {
-    const pageLimit = Math.min(MAX_REQUESTS_PER_CHUNK, effectiveTotal - from);
-
-    let page: MinimalConversation[];
-    try {
-      page = await getUnanalyzedConversationsPage(from, pageLimit);
-    } catch (e) {
-      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-    }
-
-    if (page.length === 0) break;
-
-    // Build JSONL and split by file size within this page
-    const lines = page.map((c) => buildJsonlLine(c, promptContent));
+  const flushBuffer = async () => {
+    if (buffer.length === 0) return;
+    const lines = buffer.map((c) => buildJsonlLine(c, promptContent));
+    buffer = [];
     const subChunks = chunkLines(lines);
-
     for (const subChunk of subChunks) {
       const jobId = generateId();
       try {
         const fileName = `batch_chunk_${chunkIndex}_${Date.now()}.jsonl`;
         const fileId = await uploadJsonlToOpenAI(subChunk, fileName, openAIKey);
         const batchId = await createOpenAIBatch(fileId, openAIKey);
-
         const job: BatchJob = {
           id: jobId,
           openai_batch_id: batchId,
@@ -238,7 +230,7 @@ async function _POST(req: NextRequest) {
           prompt_id: promptId ?? null,
           prompt_content: promptContent,
           chunk_index: chunkIndex,
-          total_chunks: 0, // back-filled below once we know the final count
+          total_chunks: 0,
           total_conversations: subChunk.length,
           completed_conversations: 0,
           failed_conversations: 0,
@@ -248,7 +240,6 @@ async function _POST(req: NextRequest) {
           submitted_at: now,
           completed_at: null,
         };
-
         await dbInsertBatchJob(job);
         createdJobs.push(job);
       } catch (e) {
@@ -278,9 +269,34 @@ async function _POST(req: NextRequest) {
       }
       chunkIndex++;
     }
+  };
 
+  while (from < effectiveTotal) {
+    const pageLimit = Math.min(SUPABASE_PAGE_SIZE, effectiveTotal - from);
+
+    let page: MinimalConversation[];
+    try {
+      page = await getUnanalyzedConversationsPage(from, pageLimit);
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    }
+
+    if (page.length === 0) break;
+
+    buffer.push(...page);
     from += page.length;
-    if (page.length < pageLimit) break; // last page
+
+    // Flush once buffer reaches the OpenAI chunk size, or on the last page
+    const isLastPage = page.length < pageLimit || from >= effectiveTotal;
+    if (buffer.length >= MAX_REQUESTS_PER_CHUNK || isLastPage) {
+      try {
+        await flushBuffer();
+      } catch (e) {
+        return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (page.length < pageLimit) break;
   }
 
   // Step 3 — back-fill total_chunks now that we know the real count
@@ -424,6 +440,23 @@ export async function PATCH(req: NextRequest) {
   let imported = startAt; // running total including previous partial imports
   let failed = 0;
 
+  // Accumulators for batch writes — flushed every 100 rows.
+  // This reduces DB round trips from 2 per row to ~2 per 100 rows.
+  const BATCH_SIZE = 100;
+  type ConvUpdate = { id: string; summary: string; last_prompt_id: string | null; last_prompt_content: string | null; analyzed_at: string };
+  let convBatch: ConvUpdate[] = [];
+  let runBatch: AnalysisRun[] = [];
+
+  const flushBatch = async () => {
+    if (convBatch.length === 0) return;
+    await Promise.all([
+      dbBatchUpdateAnalysisFields(convBatch),
+      dbBatchInsertAnalysisRuns(runBatch),
+    ]);
+    convBatch = [];
+    runBatch = [];
+  };
+
   for (let i = startAt; i < lines.length; i++) {
     const line = lines[i];
     try {
@@ -444,15 +477,16 @@ export async function PATCH(req: NextRequest) {
         result.response?.body?.choices?.[0]?.message?.content ?? null;
       if (!analysisText) { failed++; continue; }
 
-      await dbUpdateAnalysisFields(convId, {
+      convBatch.push({
+        id: convId,
         summary: analysisText,
-        last_prompt_id: promptId,
+        last_prompt_id: promptId ?? null,
         last_prompt_content: promptContent,
         analyzed_at: now,
       });
 
       const meta = convMeta.get(convId);
-      const run: AnalysisRun = {
+      runBatch.push({
         id: generateId(),
         conversation_id: convId,
         conversation_title: meta?.title ?? null,
@@ -472,19 +506,22 @@ export async function PATCH(req: NextRequest) {
         recommended_action: null,
         is_alert_worthy: false,
         alert_reason: null,
-      };
-      await dbInsertAnalysisRun(run);
+      });
 
       imported++;
     } catch {
       failed++;
     }
 
-    // Persist cursor every 100 rows so a crash only loses ≤100 rows of progress
-    if ((i + 1) % 100 === 0) {
+    // Flush every BATCH_SIZE rows: persist cursor + write to DB
+    if (convBatch.length >= BATCH_SIZE) {
+      await flushBatch();
       await dbUpdateBatchJob(job.id, { imported_count: imported });
     }
   }
+
+  // Flush any remaining rows
+  await flushBatch();
 
   // Final update
   await dbUpdateBatchJob(job.id, {

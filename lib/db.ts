@@ -544,6 +544,33 @@ export async function dbUpdateAnalysisFields(
   if (error) throw new Error(`[db] update analysis fields (${id}): ${error.message}`);
 }
 
+// Batch version: runs all conversation updates concurrently to avoid
+// thousands of sequential round trips during import.
+export async function dbBatchUpdateAnalysisFields(
+  rows: Array<{
+    id: string;
+    summary: string;
+    last_prompt_id: string | null;
+    last_prompt_content: string | null;
+    analyzed_at: string;
+  }>
+): Promise<void> {
+  await Promise.all(
+    rows.map(({ id, ...fields }) =>
+      supabase.from('conversations').update(fields).eq('id', id).then(({ error }) => {
+        if (error) throw new Error(`[db] update analysis fields (${id}): ${error.message}`);
+      })
+    )
+  );
+}
+
+// Batch insert for analysis_runs — single DB round trip instead of one per row.
+export async function dbBatchInsertAnalysisRuns(runs: import('@/lib/types').AnalysisRun[]): Promise<void> {
+  if (runs.length === 0) return;
+  const { error } = await supabase.from('analysis_runs').insert(runs);
+  if (error) throw new Error(`[db] batch insert analysis runs: ${error.message} (code: ${error.code})`);
+}
+
 // ── Load all state ─────────────────────────────────────────────────────────
 
 export async function loadFromSupabase(): Promise<{ conversations: Conversation[]; prompts: PromptVersion[] } | null> {
