@@ -313,6 +313,16 @@ export async function loadConversationsByDate(
   };
 }
 
+export async function getConversationById(id: string): Promise<Conversation | null> {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error || !data) return null;
+  return mapConversationRow(data);
+}
+
 export async function loadConversations(
   page = 0,
   perPage = 24,
