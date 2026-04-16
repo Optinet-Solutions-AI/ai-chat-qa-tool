@@ -158,6 +158,15 @@ function mapOpenAIStatus(s: string): BatchJobStatus {
 //     keeping each file within the enqueued-token limits for Tier-1 keys.
 
 export async function POST(req: NextRequest) {
+  try {
+  return await _POST(req);
+  } catch (e) {
+    console.error('[batch-analysis POST] unhandled error:', e);
+    return NextResponse.json({ error: (e as Error).message ?? 'Internal server error' }, { status: 500 });
+  }
+}
+
+async function _POST(req: NextRequest) {
   const openAIKey = process.env.OPENAI_API_KEY;
   if (!openAIKey) return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
 
@@ -246,7 +255,9 @@ export async function POST(req: NextRequest) {
         submitted_at: null,
         completed_at: null,
       };
-      await dbInsertBatchJob(failedJob);
+      try { await dbInsertBatchJob(failedJob); } catch (dbErr) {
+        console.error('[batch-analysis] failed to save failed job record:', dbErr);
+      }
       createdJobs.push(failedJob);
     }
   }
