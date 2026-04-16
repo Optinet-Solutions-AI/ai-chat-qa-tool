@@ -9,6 +9,7 @@ import {
   dbGetBatchJobById,
   dbUpdateAnalysisFields,
   dbInsertAnalysisRun,
+  getConversationMetadataBatch,
   type MinimalConversation,
 } from '@/lib/db';
 import type { BatchJob, BatchJobStatus, AnalysisRun } from '@/lib/types';
@@ -408,6 +409,18 @@ export async function PATCH(req: NextRequest) {
   const promptContent = job.prompt_content ?? '';
   const now = new Date().toISOString();
 
+  // Pre-fetch conversation metadata (title + player_name) for all lines in one
+  // batch query so analysis_runs rows are properly populated instead of null.
+  const allConvIds = lines
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean)
+    .map((r: { custom_id?: string }) => {
+      const id = r.custom_id ?? '';
+      return id.startsWith('conv-') ? id.slice(5) : null;
+    })
+    .filter((id): id is string => id !== null);
+  const convMeta = await getConversationMetadataBatch(allConvIds);
+
   let imported = startAt; // running total including previous partial imports
   let failed = 0;
 
@@ -438,11 +451,12 @@ export async function PATCH(req: NextRequest) {
         analyzed_at: now,
       });
 
+      const meta = convMeta.get(convId);
       const run: AnalysisRun = {
         id: generateId(),
         conversation_id: convId,
-        conversation_title: null,
-        player_name: null,
+        conversation_title: meta?.title ?? null,
+        player_name: meta?.player_name ?? null,
         analyzed_at: now,
         prompt_id: promptId ?? null,
         prompt_title: null,

@@ -259,6 +259,20 @@ export async function dbDeleteAnalysisRun(id: string): Promise<void> {
   if (error) throw new Error(`[db] delete analysis run: ${error.message}`);
 }
 
+export async function getConversationMetadataBatch(
+  ids: string[],
+): Promise<Map<string, { title: string | null; player_name: string | null }>> {
+  if (ids.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, title, player_name')
+    .in('id', ids);
+  if (error) return new Map();
+  return new Map(
+    (data ?? []).map((r) => [r.id, { title: r.title ?? null, player_name: r.player_name ?? null }]),
+  );
+}
+
 export async function getExistingIntercomIds(ids: string[]): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
   const { data, error } = await supabase
