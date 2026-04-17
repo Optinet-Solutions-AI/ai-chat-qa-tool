@@ -5,6 +5,40 @@ import { useToast } from '@/components/layout/ToastProvider';
 import { useConfirm } from '@/components/layout/ConfirmProvider';
 import type { AiQuery } from '@/lib/types';
 
+// ── Minimal Web Speech API types (not in lib.dom yet) ─────────────────────
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      [index: number]: { transcript: string };
+    };
+  };
+}
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface ToolCall {
@@ -43,6 +77,21 @@ function IconArrowUp() {
   return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+    </svg>
+  );
+}
+function IconMic() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+    </svg>
+  );
+}
+function IconMicOff() {
+  return (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" stroke="currentColor" strokeWidth={1.75} fill="none" d="M6 12.75v-1.5m12 1.5v-1.5M12 18.75v3.75m-3.75 0h7.5" />
     </svg>
   );
 }
@@ -161,6 +210,73 @@ export default function AskAIPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Speech-to-text state
+  const [listening, setListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const baseTranscriptRef = useRef('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    setSpeechSupported(!!Ctor);
+  }, []);
+
+  const toggleMic = () => {
+    if (!speechSupported) {
+      toast('Speech recognition is not available in this browser. Try Chrome.', 'error');
+      return;
+    }
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Ctor) return;
+
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+
+    baseTranscriptRef.current = question ? question + ' ' : '';
+
+    rec.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = '';
+      let final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) final += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      setQuestion((baseTranscriptRef.current + final + interim).trimStart());
+      if (final) baseTranscriptRef.current += final;
+    };
+
+    rec.onerror = (e: SpeechRecognitionErrorEvent) => {
+      if (e.error !== 'aborted' && e.error !== 'no-speech') {
+        toast(`Mic error: ${e.error}`, 'error');
+      }
+      setListening(false);
+    };
+
+    rec.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      rec.start();
+      recognitionRef.current = rec;
+      setListening(true);
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  };
+
+  useEffect(() => () => recognitionRef.current?.abort(), []);
 
   // ── Ask ─────────────────────────────────────────────────────────────────
 
@@ -288,13 +404,33 @@ export default function AskAIPage() {
                       ask(question);
                     }
                   }}
-                  placeholder="Ask a question about customer support conversations..."
+                  placeholder={listening ? 'Listening…' : 'Ask a question about customer support conversations...'}
                   rows={1}
                   maxLength={500}
                   disabled={asking}
-                  className="w-full pl-12 pr-14 py-3.5 border border-slate-200 rounded-2xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm hover:shadow-md transition-shadow resize-none"
+                  className="w-full pl-12 pr-24 py-3.5 border border-slate-200 rounded-2xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm hover:shadow-md transition-shadow resize-none"
                   style={{ minHeight: 56 }}
                 />
+
+                {/* Mic button */}
+                {speechSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    disabled={asking}
+                    title={listening ? 'Stop listening' : 'Speak your question'}
+                    className={[
+                      'absolute right-14 top-3 w-9 h-9 rounded-xl flex items-center justify-center transition-colors',
+                      listening
+                        ? 'bg-red-100 text-red-600 hover:bg-red-200 animate-pulse'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                    ].join(' ')}
+                    aria-label={listening ? 'Stop listening' : 'Start voice input'}
+                  >
+                    {listening ? <IconMicOff /> : <IconMic />}
+                  </button>
+                )}
+
                 <button
                   type="submit"
                   disabled={asking || !question.trim()}
@@ -306,6 +442,11 @@ export default function AskAIPage() {
                     : <IconArrowUp />}
                 </button>
               </div>
+              {listening && (
+                <p className="mt-2 text-xs text-red-500 text-center animate-pulse">
+                  🎤 Listening… click the mic again to stop
+                </p>
+              )}
             </form>
 
             {/* Suggestions */}
