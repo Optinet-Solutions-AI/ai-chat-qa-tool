@@ -215,7 +215,7 @@ async function _POST(req: NextRequest) {
   if (activeJobCount >= MAX_CHUNKS_PER_SUBMISSION) {
     return NextResponse.json(
       {
-        error: `${activeJobCount} batch(es) are still in progress. Wait for them to complete, then submit again — remaining conversations will be picked up automatically.`,
+        error: `${activeJobCount} batch(es) still in progress — ${totalAvailable.toLocaleString()} conversations remaining. Wait for them to complete, then submit again.`,
         activeJobCount,
       },
       { status: 429 },
