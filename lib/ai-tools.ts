@@ -67,17 +67,25 @@ async function groupCount(
 }
 
 async function agentLeaderboard({
-  start_date, end_date, metric = 'rating', limit,
-}: { start_date: string; end_date: string; metric?: 'rating' | 'performance'; limit?: number }) {
+  start_date, end_date, metric = 'rating', limit, min_conversations,
+}: { start_date: string; end_date: string; metric?: 'rating' | 'performance'; limit?: number; min_conversations?: number }) {
   const [startISO, endISO] = parseDateRange(start_date, end_date);
   const { data, error } = await supabase.rpc('agent_leaderboard', {
     p_start: startISO,
     p_end: endISO,
     p_metric: metric === 'performance' ? 'performance' : 'rating',
     p_limit: clampLimit(limit, 20, 10),
+    p_min_conversations: clampLimit(min_conversations, 50, 1),
   });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+async function dataCoverage({ start_date, end_date }: { start_date: string; end_date: string }) {
+  const [startISO, endISO] = parseDateRange(start_date, end_date);
+  const { data, error } = await supabase.rpc('data_coverage', { p_start: startISO, p_end: endISO });
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? null;
 }
 
 async function alertWorthyConversations({
@@ -141,10 +149,12 @@ export const tools: Record<string, ToolFn> = {
   severity_breakdown:           (a) => groupCount('dissatisfaction_severity', a as { start_date: string; end_date: string; limit?: number }),
   brand_breakdown:              (a) => groupCount('brand', a as { start_date: string; end_date: string; limit?: number }),
   language_breakdown:           (a) => groupCount('language', a as { start_date: string; end_date: string; limit?: number }),
-  agent_performance_leaderboard:(a) => agentLeaderboard(a as { start_date: string; end_date: string; metric?: 'rating' | 'performance'; limit?: number }),
+  agent_performance_leaderboard:(a) => agentLeaderboard(a as { start_date: string; end_date: string; metric?: 'rating' | 'performance'; limit?: number; min_conversations?: number }),
+  top_agents_by_volume:         (a) => groupCount('agent_name', a as { start_date: string; end_date: string; limit?: number }),
   alert_worthy_conversations:   (a) => alertWorthyConversations(a as { start_date: string; end_date: string; limit?: number }),
   recent_unresolved:            (a) => recentUnresolved(a as { start_date: string; end_date: string; limit?: number }),
   sample_ai_summaries:          (a) => sampleAiSummaries(a as { start_date: string; end_date: string; limit?: number }),
+  data_coverage:                (a) => dataCoverage(a as { start_date: string; end_date: string }),
 };
 
 // ── OpenAI tool schemas (function-calling format) ────────────────────────
@@ -226,17 +236,34 @@ export const toolSchemas = [
     type: 'function',
     function: {
       name: 'agent_performance_leaderboard',
-      description: 'Top agents ranked by average customer rating (metric=rating) or AI-judged performance score (metric=performance). Only includes agents with at least 3 conversations in the date range. Use for "best agent", "worst agent", "top performing agents".',
+      description: 'Top agents ranked by average customer rating (metric=rating) or AI-judged performance score (metric=performance). Only includes agents with at least min_conversations (default 1). Use for "best agent", "worst agent", "top performing agents". NOTE: This requires customer ratings or analysis scores to be present. If this returns empty, call data_coverage to diagnose, or try top_agents_by_volume instead.',
       parameters: {
         type: 'object',
         properties: {
           ...dateRange,
-          metric: { type: 'string', enum: ['rating', 'performance'], description: "'rating' uses customer CSAT score, 'performance' uses AI-judged agent performance score. Default 'rating'." },
+          metric: { type: 'string', enum: ['rating', 'performance'], description: "'rating' uses customer CSAT score (usually sparse), 'performance' uses AI-judged agent performance score. Default 'rating'." },
           limit: limitProp,
+          min_conversations: { type: 'integer', description: 'Minimum number of (rated) conversations an agent needs to appear. Default 1.', minimum: 1, maximum: 50 },
         },
         required: dateRangeReq,
         additionalProperties: false,
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'top_agents_by_volume',
+      description: 'Agents ranked by number of conversations handled in a date range. Use when asked about "most active agent", "agent who handled the most conversations", or as a fallback when agent_performance_leaderboard returns empty (no ratings/scores available).',
+      parameters: { type: 'object', properties: { ...dateRange, limit: limitProp }, required: dateRangeReq, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'data_coverage',
+      description: 'Diagnostic: returns how many conversations in a date range have each key field populated (agent name, rating, performance score, summary, resolution, issue category, sentiment). Use this when another tool returns empty or unexpected results to understand what data is actually available.',
+      parameters: { type: 'object', properties: { ...dateRange }, required: dateRangeReq, additionalProperties: false },
     },
   },
   {
