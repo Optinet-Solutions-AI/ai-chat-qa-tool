@@ -119,14 +119,13 @@ export async function safeJson<T>(res: Response): Promise<T | null> {
   try { return await res.json() as T; } catch { return null; }
 }
 
-// ── Date → CEST Unix range ─────────────────────────────────────────────────
+// ── Date → UTC Unix range ──────────────────────────────────────────────────
 
-/** Convert a YYYY-MM-DD string to a [startUnix, endUnix] range in CEST (UTC+2). */
+/** Convert a YYYY-MM-DD string to a [startUnix, endUnix] range in UTC. */
 export function cestDateToUnixRange(date: string): [number, number] {
   const [year, month, day] = date.split('-').map(Number);
-  const CEST_OFFSET_SEC = 2 * 3600;
-  const start = Math.floor(Date.UTC(year, month - 1, day, 0, 0, 0) / 1000) - CEST_OFFSET_SEC;
-  const end   = Math.floor(Date.UTC(year, month - 1, day, 23, 59, 59) / 1000) - CEST_OFFSET_SEC;
+  const start = Math.floor(Date.UTC(year, month - 1, day, 0, 0, 0) / 1000);
+  const end   = Math.floor(Date.UTC(year, month - 1, day, 23, 59, 59) / 1000);
   return [start, end];
 }
 
@@ -227,7 +226,13 @@ export async function fetchIntercomData(
 
   const transcript = parts
     .filter((p) => p.part_type === 'comment' && p.body)
-    .map((p) => `${p.author.type === 'admin' ? 'Agent' : 'User'}: ${stripHtml(p.body)}`)
+    .map((p) => {
+      let label: string;
+      if (p.author.type === 'admin') label = 'Agent';
+      else if (p.author.type === 'bot') label = 'Bot';
+      else label = 'Player';
+      return `${label}: ${stripHtml(p.body)}`;
+    })
     .join('\n\n');
   if (!transcript.trim()) throw new Error('No readable transcript in this conversation.');
   const MAX_CHARS = 60000;

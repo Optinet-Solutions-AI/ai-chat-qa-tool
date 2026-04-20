@@ -151,8 +151,47 @@ export async function dbUpdateConversation(c: Conversation): Promise<void> {
 
 export async function dbUpdateConversationByIntercomId(c: Conversation): Promise<void> {
   if (!c.intercom_id) throw new Error('[db] update by intercom_id: missing intercom_id');
-  const { id: _id, ...row } = conversationRow(c);
-  const { error } = await supabase.from('conversations').update(row).eq('intercom_id', c.intercom_id);
+  // Only update Intercom-sourced fields — never overwrite AI analysis results
+  const { error } = await supabase.from('conversations').update({
+    intercom_created_at: c.intercom_created_at,
+    title: c.title,
+    player_name: c.player_name,
+    player_email: c.player_email,
+    player_id: c.player_id,
+    player_external_id: c.player_external_id,
+    player_phone: c.player_phone,
+    player_tags: c.player_tags,
+    player_signed_up_at: c.player_signed_up_at,
+    player_last_seen_at: c.player_last_seen_at,
+    player_last_replied_at: c.player_last_replied_at,
+    player_last_contacted_at: c.player_last_contacted_at,
+    player_country: c.player_country,
+    player_city: c.player_city,
+    player_browser: c.player_browser,
+    player_os: c.player_os,
+    player_custom_attributes: c.player_custom_attributes,
+    player_companies: c.player_companies,
+    player_segments: c.player_segments,
+    player_event_summaries: c.player_event_summaries,
+    agent_name: c.agent_name,
+    agent_email: c.agent_email,
+    is_bot_handled: c.is_bot_handled,
+    brand: c.brand,
+    tags: c.tags,
+    query_type: c.query_type,
+    ai_subject: c.ai_subject,
+    ai_issue_summary: c.ai_issue_summary,
+    cx_score_rating: c.cx_score_rating != null ? Math.round(c.cx_score_rating) : null,
+    cx_score_explanation: c.cx_score_explanation,
+    conversation_rating_score: c.conversation_rating_score != null ? Math.round(c.conversation_rating_score) : null,
+    conversation_rating_remark: c.conversation_rating_remark,
+    time_to_assignment: c.time_to_assignment != null ? Math.round(c.time_to_assignment) : null,
+    time_to_admin_reply: c.time_to_admin_reply != null ? Math.round(c.time_to_admin_reply) : null,
+    time_to_first_close: c.time_to_first_close != null ? Math.round(c.time_to_first_close) : null,
+    median_time_to_reply: c.median_time_to_reply != null ? Math.round(c.median_time_to_reply) : null,
+    count_reopens: c.count_reopens != null ? Math.round(c.count_reopens) : null,
+    original_text: c.original_text,
+  }).eq('intercom_id', c.intercom_id);
   if (error) throw new Error(`[db] update conversation by intercom_id: ${error.message}`);
 }
 
