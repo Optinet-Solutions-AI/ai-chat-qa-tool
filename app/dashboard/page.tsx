@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import ConversationsOverlay from '@/components/dashboard/ConversationsOverlay';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line,
@@ -49,6 +49,19 @@ const SEVERITY_COLORS: Record<string, string> = {
   Medium:   '#f59e0b',
   High:     '#f97316',
   Critical: '#ef4444',
+};
+
+const OVERLAY_LABELS: Record<string, string> = {
+  resolution_status:        'Resolution',
+  dissatisfaction_severity: 'Severity',
+  issue_category:           'Category',
+  issue_item:               'Issue',
+  language:                 'Language',
+  brand:                    'Brand',
+  agent_name:               'Agent',
+  dateFrom:                 'Date',
+  analyzed:                 'Analyzed',
+  alert_worthy:             'Alert-worthy',
 };
 
 // ── Small helpers ──────────────────────────────────────────────────────────
@@ -210,10 +223,13 @@ function MultiSelectFilter({ options, groups, selected, onChange, placeholder, e
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const router = useRouter();
   const [data, setData]       = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+
+  // Overlay state
+  const [overlayFilters, setOverlayFilters] = useState<Record<string, string> | null>(null);
+  const [overlayTitle, setOverlayTitle]     = useState('');
 
   // Filters
   const [dateFrom, setDateFrom]       = useState('');
@@ -224,16 +240,31 @@ export default function DashboardPage() {
   const [issues, setIssues]           = useState<string[]>([]);
 
   const navToConversations = useCallback((extra: Record<string, string>) => {
-    const p = new URLSearchParams();
-    if (dateFrom) p.set('dateFrom', dateFrom);
-    if (dateTo)   p.set('dateTo',   dateTo);
-    if (brand)    p.set('brand',    brand);
-    if (agent)    p.set('agent_name', agent);
-    if (categories.length === 1) p.set('issue_category', categories[0]);
-    if (issues.length === 1)     p.set('issue_item', issues[0]);
-    Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); });
-    router.push(`/?${p}`);
-  }, [router, dateFrom, dateTo, brand, agent, categories, issues]);
+    const filters: Record<string, string> = {};
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo)   filters.dateTo   = dateTo;
+    if (brand)    filters.brand    = brand;
+    if (agent)    filters.agent_name = agent;
+    if (categories.length === 1) filters.issue_category = categories[0];
+    if (issues.length === 1)     filters.issue_item     = issues[0];
+    Object.entries(extra).forEach(([k, v]) => { if (v) filters[k] = v; });
+
+    // Build a human-readable title from the extra filters
+    const extraEntries = Object.entries(extra).filter(([, v]) => v);
+    let title = 'Conversations';
+    if (extraEntries.length > 0) {
+      const [key, val] = extraEntries[0];
+      const label = OVERLAY_LABELS[key] ?? key;
+      if (val === 'true' && key === 'alert_worthy') title = 'Alert-worthy Conversations';
+      else if (val === 'true' && key === 'analyzed') title = 'Analyzed Conversations';
+      else if (val === 'false' && key === 'analyzed') title = 'Unanalyzed Conversations';
+      else title = `${label}: ${val}`;
+    }
+
+    setOverlayTitle(title);
+    setOverlayFilters(filters);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, brand, agent, categories, issues]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -726,6 +757,14 @@ export default function DashboardPage() {
             </Section>
           </div>
         </>
+      )}
+
+      {overlayFilters && (
+        <ConversationsOverlay
+          filters={overlayFilters}
+          title={overlayTitle}
+          onClose={() => setOverlayFilters(null)}
+        />
       )}
     </div>
   );
