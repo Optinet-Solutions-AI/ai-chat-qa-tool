@@ -77,11 +77,13 @@ function sleep(ms: number) {
   return new Promise<void>((res) => setTimeout(res, ms));
 }
 
-/** Returns yesterday's date in YYYY-MM-DD (UTC). */
-function yesterdayUtc(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
+/** Returns the last N days in YYYY-MM-DD (UTC), most recent first. */
+function lastNDaysUtc(n: number): string[] {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - (i + 1));
+    return d.toISOString().slice(0, 10);
+  });
 }
 
 // ── Background worker ──────────────────────────────────────────────────────
@@ -250,17 +252,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'INTERCOM_API_KEY not configured' }, { status: 500 });
   }
 
-  // ── Date ─────────────────────────────────────────────────────────────────
+  // ── Dates ─────────────────────────────────────────────────────────────────
+  // If a specific date is passed, process just that one.
+  // Otherwise process the last 3 days so missed/partial days self-correct.
   const dateParam = req.nextUrl.searchParams.get('date');
-  const date = dateParam ?? yesterdayUtc();
+  const dates = dateParam ? [dateParam] : lastNDaysUtc(3);
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (dates.some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d))) {
     return NextResponse.json({ error: 'Invalid date format. Use YYYY-MM-DD.' }, { status: 400 });
   }
 
   // Kick off the heavy work in the background so cron-job.org gets a fast 200
   // response instead of timing out waiting for all conversations to be fetched.
-  waitUntil(runCollection(date, apiKey));
+  waitUntil((async () => {
+    for (const date of dates) {
+      await runCollection(date, apiKey);
+    }
+  })());
 
-  return NextResponse.json({ date, message: 'Collection started in background' });
+  return NextResponse.json({ dates, message: 'Collection started in background' });
 }
