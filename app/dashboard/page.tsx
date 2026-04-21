@@ -31,7 +31,7 @@ interface DashboardData {
   brandBreakdown: LabelCount[];
   agentBreakdown: LabelCount[];
   conversationsByDate: DateCount[];
-  filterOptions: { brands: string[]; agents: string[] };
+  filterOptions: { brands: string[]; agents: string[]; categories: string[] };
 }
 
 // ── Colour palette ─────────────────────────────────────────────────────────
@@ -108,6 +108,85 @@ function Empty({ message }: { message: string }) {
   );
 }
 
+// ── Category multi-select ──────────────────────────────────────────────────
+
+function CategoryFilter({ options, selected, onChange }: {
+  options: string[];
+  selected: string[];
+  onChange: (val: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const toggle = (cat: string) =>
+    onChange(selected.includes(cat) ? selected.filter((c) => c !== cat) : [...selected, cat]);
+
+  const remove = (cat: string) => onChange(selected.filter((c) => c !== cat));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-2 min-w-[180px] justify-between bg-white"
+        >
+          <span className="truncate">{selected.length === 0 ? 'All categories' : `${selected.length} selected`}</span>
+          <svg className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {open && (
+          <div className="absolute z-20 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[240px] max-h-64 overflow-y-auto">
+            {options.length === 0 && (
+              <p className="px-3 py-2 text-xs text-slate-400">No categories yet</p>
+            )}
+            {options.map((cat) => (
+              <label key={cat} className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(cat)}
+                  onChange={() => toggle(cat)}
+                  className="w-3.5 h-3.5 rounded border-slate-300 accent-blue-600"
+                />
+                {cat}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((cat) => (
+            <span key={cat} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
+              {cat}
+              <button
+                type="button"
+                onClick={() => remove(cat)}
+                className="ml-0.5 hover:text-blue-900 focus:outline-none"
+                aria-label={`Remove ${cat}`}
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -117,10 +196,11 @@ export default function DashboardPage() {
   const [error, setError]     = useState<string | null>(null);
 
   // Filters
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
-  const [brand, setBrand]       = useState('');
-  const [agent, setAgent]       = useState('');
+  const [dateFrom, setDateFrom]       = useState('');
+  const [dateTo, setDateTo]           = useState('');
+  const [brand, setBrand]             = useState('');
+  const [agent, setAgent]             = useState('');
+  const [categories, setCategories]   = useState<string[]>([]);
 
   const navToConversations = useCallback((extra: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -128,9 +208,10 @@ export default function DashboardPage() {
     if (dateTo)   p.set('dateTo',   dateTo);
     if (brand)    p.set('brand',    brand);
     if (agent)    p.set('agent_name', agent);
+    if (categories.length === 1) p.set('issue_category', categories[0]);
     Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); });
     router.push(`/?${p}`);
-  }, [router, dateFrom, dateTo, brand, agent]);
+  }, [router, dateFrom, dateTo, brand, agent, categories]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -141,6 +222,7 @@ export default function DashboardPage() {
       if (dateTo)   params.set('dateTo',   dateTo);
       if (brand)    params.set('brand',    brand);
       if (agent)    params.set('agent',    agent);
+      categories.forEach((c) => params.append('category', c));
 
       const res = await fetch(`/api/dashboard?${params}`);
       if (!res.ok) throw new Error('Failed to load dashboard');
@@ -150,12 +232,13 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, brand, agent]);
+  }, [dateFrom, dateTo, brand, agent, categories]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const brandOptions  = data?.filterOptions.brands  ?? [];
-  const agentOptions  = data?.filterOptions.agents  ?? [];
+  const brandOptions    = data?.filterOptions.brands     ?? [];
+  const agentOptions    = data?.filterOptions.agents     ?? [];
+  const categoryOptions = data?.filterOptions.categories ?? [];
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -221,9 +304,17 @@ export default function DashboardPage() {
             {agentOptions.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
-        {(dateFrom || dateTo || brand || agent) && (
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Category</label>
+          <CategoryFilter
+            options={categoryOptions}
+            selected={categories}
+            onChange={setCategories}
+          />
+        </div>
+        {(dateFrom || dateTo || brand || agent || categories.length > 0) && (
           <button
-            onClick={() => { setDateFrom(''); setDateTo(''); setBrand(''); setAgent(''); }}
+            onClick={() => { setDateFrom(''); setDateTo(''); setBrand(''); setAgent(''); setCategories([]); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline pb-1.5"
           >
             Clear filters

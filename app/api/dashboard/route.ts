@@ -18,6 +18,11 @@ function parseSummaryJson(raw: string | null): Record<string, unknown> | null {
   return null;
 }
 
+// Normalise "Category 1: Foo" → "1. Foo" so variant AI formats collapse to one entry
+function normalizeCategory(label: string): string {
+  return label.replace(/^category\s+(\d+)[:\s]+/i, '$1. ').trim();
+}
+
 function countBy<T>(items: T[], key: (item: T) => string | null): { label: string; count: number }[] {
   const map: Record<string, { count: number; label: string }> = {};
   for (const item of items) {
@@ -31,14 +36,15 @@ function countBy<T>(items: T[], key: (item: T) => string | null): { label: strin
 }
 
 // ── GET /api/dashboard ─────────────────────────────────────────────────────
-// Query params: dateFrom, dateTo, brand, agent
+// Query params: dateFrom, dateTo, brand, agent, category
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const dateFrom = searchParams.get('dateFrom');
-  const dateTo   = searchParams.get('dateTo');
-  const brand    = searchParams.get('brand');
-  const agent    = searchParams.get('agent');
+  const dateFrom   = searchParams.get('dateFrom');
+  const dateTo     = searchParams.get('dateTo');
+  const brand      = searchParams.get('brand');
+  const agent      = searchParams.get('agent');
+  const categories = searchParams.getAll('category');
 
   try {
     // ── Build base query filters (dates interpreted in CEST / UTC+2) ────────
@@ -109,24 +115,85 @@ export async function GET(req: NextRequest) {
         severity:
           (r.dissatisfaction_severity as string | null) ??
           (json?.dissatisfaction_severity as string | null) ?? null,
-        categories: results.map((x) => x.category ?? 'Unknown'),
-        items: results.map((x) => ({ category: x.category ?? 'Unknown', item: x.item ?? 'Unknown' })),
+        categories: results.map((x) => normalizeCategory(x.category ?? 'Unknown')),
+        items: results.map((x) => ({ category: normalizeCategory(x.category ?? 'Unknown'), item: x.item ?? 'Unknown' })),
       };
     });
 
+    // ── Collect category options for the dropdown (before filtering) ─────────
+    // Sort by frequency and apply a minimum count so mislabeled items (which the
+    // AI occasionally writes into results[].category) are excluded. Real categories
+    // appear hundreds–thousands of times; one-off mislabels appear a handful.
+    const allCategoryFreq: Record<string, { count: number; label: string }> = {};
+    for (const c of parsed.flatMap((p) => p.categories)) {
+      if (c === 'Unknown') continue;
+      const key = c.toLowerCase().trim();
+      if (!allCategoryFreq[key]) allCategoryFreq[key] = { count: 0, label: c };
+      allCategoryFreq[key].count++;
+    }
+    const numPrefix = (s: string) => { const m = s.match(/^(\d+)\./); return m ? parseInt(m[1], 10) : 999; };
+    const minCategoryCount = Math.max(3, Math.ceil(rows.length * 0.003));
+    const canonicalCategories = [
+      '1. Account Closure & Self-Exclusion Requests',
+      '2. Payments (Deposits, Limits, Refunds)',
+      '3. Withdrawal Disputes',
+      '4. Player Experience & Expectations (Retention)',
+      '5. Verification Issues',
+    ];
+    // Build a map of numeric prefix → canonical key so variants like
+    // "1. Account Closure Requests" get folded into the canonical entry.
+    const canonicalKeyByPrefix: Record<number, string> = {};
+    for (const label of canonicalCategories) {
+      const p = numPrefix(label);
+      if (p !== 999) canonicalKeyByPrefix[p] = label.toLowerCase().trim();
+    }
+    // Fold any data-driven variant that shares a prefix with a canonical into it
+    for (const key of Object.keys(allCategoryFreq)) {
+      const p = numPrefix(key);
+      const canonKey = canonicalKeyByPrefix[p];
+      if (canonKey && key !== canonKey) {
+        if (!allCategoryFreq[canonKey]) allCategoryFreq[canonKey] = { count: 0, label: canonicalCategories[p - 1] };
+        allCategoryFreq[canonKey].count += allCategoryFreq[key].count;
+        delete allCategoryFreq[key];
+      }
+    }
+    // Ensure all canonical categories always appear in the dropdown
+    for (const label of canonicalCategories) {
+      const key = label.toLowerCase().trim();
+      if (!allCategoryFreq[key]) allCategoryFreq[key] = { count: minCategoryCount, label };
+      else allCategoryFreq[key].label = label; // enforce canonical label text
+    }
+    const allCategoryLabels = Object.values(allCategoryFreq)
+      .filter(({ count }) => count >= minCategoryCount)
+      .sort((a, b) => numPrefix(a.label) - numPrefix(b.label))
+      .map(({ label }) => label);
+
+    // ── Filter by category (in-memory, since categories live in summary JSON) ──
+    // Match by exact key OR by numeric prefix so that selecting a canonical like
+    // "1. Account Closure & Self-Exclusion Requests" also catches DB variants
+    // like "1. Account Closure Requests" that share prefix 1.
+    const categoryKeys = categories.map((c) => c.toLowerCase().trim());
+    const categoryPrefixes = new Set(categoryKeys.map((k) => numPrefix(k)).filter((p) => p !== 999));
+    const matchesCategory = (c: string) => {
+      const ck = c.toLowerCase().trim();
+      return categoryKeys.includes(ck) || categoryPrefixes.has(numPrefix(ck));
+    };
+    const filteredRows   = categoryKeys.length > 0 ? rows.filter((_, i) => parsed[i].categories.some((c) => matchesCategory(c))) : rows;
+    const filteredParsed = categoryKeys.length > 0 ? parsed.filter((p)  => p.categories.some((c) => matchesCategory(c))) : parsed;
+
     // ── Resolution breakdown ─────────────────────────────────────────────
-    const resolutionBreakdown = countBy(parsed, (p) => p.resolution_status);
+    const resolutionBreakdown = countBy(filteredParsed, (p) => p.resolution_status);
 
     // ── Severity breakdown ───────────────────────────────────────────────
-    const severityBreakdown = countBy(parsed, (p) => p.severity);
+    const severityBreakdown = countBy(filteredParsed, (p) => p.severity);
 
     // ── Language breakdown ───────────────────────────────────────────────
-    const languageBreakdown = countBy(parsed, (p) =>
+    const languageBreakdown = countBy(filteredParsed, (p) =>
       p.language ? p.language.toUpperCase() : null
     ).slice(0, 10);
 
     // ── Top issue categories ─────────────────────────────────────────────
-    const allCategories = parsed.flatMap((p) => p.categories);
+    const allCategories = filteredParsed.flatMap((p) => p.categories);
     const categoryMap: Record<string, { count: number; label: string }> = {};
     for (const c of allCategories) {
       const key = c.toLowerCase().trim();
@@ -139,7 +206,7 @@ export async function GET(req: NextRequest) {
       .map(({ label, count }) => ({ label, count }));
 
     // ── Top issue items ──────────────────────────────────────────────────
-    const allItems = parsed.flatMap((p) => p.items);
+    const allItems = filteredParsed.flatMap((p) => p.items);
     const itemMap: Record<string, { count: number; label: string; category: string }> = {};
     for (const { item, category } of allItems) {
       const key = item.toLowerCase().trim();
@@ -153,28 +220,45 @@ export async function GET(req: NextRequest) {
 
     // ── Brand breakdown ──────────────────────────────────────────────────
     const brandBreakdown = countBy(
-      rows,
+      filteredRows,
       (r) => (r.brand as string | null)
     ).slice(0, 15);
 
     // ── Agent breakdown ──────────────────────────────────────────────────
     const agentBreakdown = countBy(
-      rows,
+      filteredRows,
       (r) => (r.agent_name as string | null)
     ).slice(0, 15);
 
-    // ── Conversations by date (grouped in DB via RPC — no row-limit issue) ──
-    const { data: dateAgg } = await supabase.rpc('get_conversations_by_cest_date', {
-      p_date_from: cestFromISO ?? null,
-      p_date_to:   cestToISO   ?? null,
-      p_brand:     brand       ?? null,
-      p_agent:     agent       ?? null,
-    }) as { data: Array<{ cest_date: string; conversation_count: number }> | null };
-
-    const conversationsByDate = (dateAgg ?? []).map((r) => ({
-      date:  r.cest_date,
-      count: r.conversation_count,
-    }));
+    // ── Conversations by date ────────────────────────────────────────────────
+    // When a category filter is active we can't use the DB RPC (it has no category
+    // param), so we group the already-filtered in-memory rows by CEST date instead.
+    let conversationsByDate: { date: string; count: number }[];
+    if (categoryKeys.length > 0) {
+      const dateCounts: Record<string, number> = {};
+      for (const r of filteredRows) {
+        const iso = r.intercom_created_at as string | null;
+        if (!iso) continue;
+        // Convert UTC → CEST (UTC+2) and take YYYY-MM-DD
+        const cestDate = new Date(new Date(iso).getTime() + 2 * 60 * 60 * 1000)
+          .toISOString().slice(0, 10);
+        dateCounts[cestDate] = (dateCounts[cestDate] ?? 0) + 1;
+      }
+      conversationsByDate = Object.entries(dateCounts)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, count]) => ({ date, count }));
+    } else {
+      const { data: dateAgg } = await supabase.rpc('get_conversations_by_cest_date', {
+        p_date_from: cestFromISO ?? null,
+        p_date_to:   cestToISO   ?? null,
+        p_brand:     brand       ?? null,
+        p_agent:     agent       ?? null,
+      }) as { data: Array<{ cest_date: string; conversation_count: number }> | null };
+      conversationsByDate = (dateAgg ?? []).map((r) => ({
+        date:  r.cest_date,
+        count: r.conversation_count,
+      }));
+    }
 
     // ── Filter options (for dropdowns) ───────────────────────────────────
     const { data: allBrands } = await supabase
@@ -190,13 +274,25 @@ export async function GET(req: NextRequest) {
     const uniqueBrands = [...new Set((allBrands ?? []).map((r) => r.brand))].sort();
     const uniqueAgents = [...new Set((allAgents ?? []).map((r) => r.agent_name))].sort();
 
+    // When a category filter is active, the DB-level counts are global (the RPC
+    // has no category param).  Use the in-memory filtered counts instead so the
+    // stat cards reflect what the charts show.
+    const overviewAnalyzed  = categoryKeys.length > 0 ? filteredRows.length  : analyzed;
+    const overviewAlertWorthy = categoryKeys.length > 0
+      ? filteredRows.filter((r) => r.is_alert_worthy).length
+      : alertWorthy;
+    // "Total" and "Unanalyzed" require fetching non-analyzed rows we don't have;
+    // fall back to the analyzed count so the numbers are coherent.
+    const overviewTotal     = categoryKeys.length > 0 ? filteredRows.length  : total;
+    const overviewUnanalyzed = categoryKeys.length > 0 ? 0 : total - analyzed;
+
     return NextResponse.json({
       overview: {
-        total,
-        analyzed,
-        unanalyzed: total - analyzed,
-        alertWorthy,
-        analyzedPct: total > 0 ? Math.round((analyzed / total) * 100) : 0,
+        total:      overviewTotal,
+        analyzed:   overviewAnalyzed,
+        unanalyzed: overviewUnanalyzed,
+        alertWorthy: overviewAlertWorthy,
+        analyzedPct: overviewTotal > 0 ? Math.round((overviewAnalyzed / overviewTotal) * 100) : 0,
       },
       resolutionBreakdown,
       severityBreakdown,
@@ -209,6 +305,7 @@ export async function GET(req: NextRequest) {
       filterOptions: {
         brands: uniqueBrands,
         agents: uniqueAgents,
+        categories: allCategoryLabels,
       },
     });
   } catch (e) {

@@ -545,14 +545,25 @@ export async function loadConversationsWithJsonFilter(
   }
 
   if (filters.issue_category) {
-    const v = filters.issue_category.toLowerCase();
+    const v = filters.issue_category.toLowerCase().trim();
+    const vPrefixMatch = v.match(/^(\d+)\./);
+    const vPrefix = vPrefixMatch ? parseInt(vPrefixMatch[1], 10) : null;
     filtered = filtered.filter((r) => {
       const json = parseSummary(r.summary);
       const results = Array.isArray(json?.results) ? json.results : [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return results.some((x: any) => {
-        const cat = (x.category as string | null)?.trim();
-        return v === 'unknown' ? !cat : cat?.toLowerCase() === v;
+        const rawCat = (x.category as string | null)?.trim();
+        if (!rawCat) return v === 'unknown';
+        // Normalize "Category N: Foo" → "N. Foo" (mirrors dashboard route)
+        const cat = rawCat.replace(/^category\s+(\d+)[:\s]+/i, '$1. ').trim().toLowerCase();
+        if (cat === v) return true;
+        // Match by numeric prefix so canonical "1. X" also catches DB variant "1. Y"
+        if (vPrefix !== null) {
+          const catPrefixMatch = cat.match(/^(\d+)\./);
+          return catPrefixMatch ? parseInt(catPrefixMatch[1], 10) === vPrefix : false;
+        }
+        return false;
       });
     });
   }
