@@ -222,14 +222,14 @@ export async function fetchIntercomData(
   const attrs = conv.custom_attributes ?? {};
   const player: IntercomAuthor = conv.source?.author ?? {};
   const firstAdminPart = parts.find((p) => p.author.type === 'admin');
-  const isBotHandled = conv.teammates?.teammates?.some((t) => t.type === 'bot') ?? false;
+  const isBotHandled = conv.teammates?.teammates?.some((t) => t.type === 'bot' || t.type === 'operator') ?? false;
 
   const transcript = parts
     .filter((p) => p.part_type === 'comment' && p.body)
     .map((p) => {
       let label: string;
       if (p.author.type === 'admin') label = 'Agent';
-      else if (p.author.type === 'bot') label = 'Bot';
+      else if (p.author.type === 'bot' || p.author.type === 'operator') label = 'Bot';
       else label = 'Player';
       return `${label}: ${stripHtml(p.body)}`;
     })

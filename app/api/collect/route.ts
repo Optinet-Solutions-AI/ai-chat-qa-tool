@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
       const conv: Conversation = {
         id: generateId(),
-        title: data.transcript?.split('\n')[0]?.replace(/^(Agent|User):\s*/i, '').slice(0, 80) || `Conversation ${intercomId}`,
+        title: data.transcript?.split('\n')[0]?.replace(/^(Agent|Bot|Player|User):\s*/i, '').slice(0, 80) || `Conversation ${intercomId}`,
         analyzed_at: new Date().toISOString(),
 
         intercom_id: data.intercom_id,

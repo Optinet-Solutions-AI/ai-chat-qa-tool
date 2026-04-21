@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend,
+  PieChart, Pie, Cell, LineChart, Line,
 } from 'recharts';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -121,12 +121,6 @@ export default function DashboardPage() {
   const [dateTo, setDateTo]     = useState('');
   const [brand, setBrand]       = useState('');
   const [agent, setAgent]       = useState('');
-
-  // Track hovered bar/slice so click handlers can read it reliably
-  const hoveredCategory  = useRef<string | null>(null);
-  const hoveredSeverity  = useRef<string | null>(null);
-  const hoveredLanguage  = useRef<string | null>(null);
-  const hoveredResolution = useRef<string | null>(null);
 
   const navToConversations = useCallback((extra: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -327,12 +321,7 @@ export default function DashboardPage() {
               ) : (
                 <>
                   <ResponsiveContainer width="100%" height={160}>
-                    <PieChart
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        if (hoveredResolution.current) navToConversations({ resolution_status: hoveredResolution.current });
-                      }}
-                    >
+                    <PieChart style={{ cursor: 'pointer' }}>
                       <Pie
                         data={data.resolutionBreakdown}
                         dataKey="count"
@@ -342,8 +331,7 @@ export default function DashboardPage() {
                         innerRadius={45}
                         outerRadius={70}
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        onMouseEnter={(d: any) => { hoveredResolution.current = d?.label ?? null; }}
-                        onMouseLeave={() => { hoveredResolution.current = null; }}
+                        onClick={(d: any) => { if (d?.label) navToConversations({ resolution_status: d.label }); }}
                       >
                         {data.resolutionBreakdown.map((entry, i) => (
                           <Cell key={i} fill={RESOLUTION_COLORS[entry.label] ?? COLORS[i % COLORS.length]} />
@@ -387,9 +375,8 @@ export default function DashboardPage() {
                       layout="vertical"
                       margin={{ top: 0, right: 16, left: 8, bottom: 0 }}
                       style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        if (hoveredCategory.current) navToConversations({ issue_category: hoveredCategory.current });
-                      }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onClick={(data: any) => { if (data?.activeLabel) navToConversations({ issue_category: data.activeLabel }); }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -400,9 +387,6 @@ export default function DashboardPage() {
                         fill="#3b82f6"
                         radius={[0, 4, 4, 0]}
                         name="Conversations"
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        onMouseEnter={(d: any) => { hoveredCategory.current = d?.label ?? null; }}
-                        onMouseLeave={() => { hoveredCategory.current = null; }}
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -421,9 +405,8 @@ export default function DashboardPage() {
                       data={data.severityBreakdown}
                       margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
                       style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        if (hoveredSeverity.current) navToConversations({ dissatisfaction_severity: hoveredSeverity.current });
-                      }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onClick={(data: any) => { if (data?.activeLabel) navToConversations({ dissatisfaction_severity: data.activeLabel }); }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -433,9 +416,6 @@ export default function DashboardPage() {
                         dataKey="count"
                         radius={[4, 4, 0, 0]}
                         name="Count"
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        onMouseEnter={(d: any) => { hoveredSeverity.current = d?.label ?? null; }}
-                        onMouseLeave={() => { hoveredSeverity.current = null; }}
                       >
                         {data.severityBreakdown.map((entry, i) => (
                           <Cell key={i} fill={SEVERITY_COLORS[entry.label] ?? COLORS[i % COLORS.length]} />
@@ -476,9 +456,8 @@ export default function DashboardPage() {
                     data={data.languageBreakdown}
                     margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
                     style={{ cursor: 'pointer' }}
-                    onClick={() => {
-                      if (hoveredLanguage.current) navToConversations({ language: hoveredLanguage.current });
-                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    onClick={(data: any) => { if (data?.activeLabel) navToConversations({ language: data.activeLabel }); }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -488,9 +467,6 @@ export default function DashboardPage() {
                       dataKey="count"
                       radius={[4, 4, 0, 0]}
                       name="Conversations"
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      onMouseEnter={(d: any) => { hoveredLanguage.current = d?.label ?? null; }}
-                      onMouseLeave={() => { hoveredLanguage.current = null; }}
                     >
                       {data.languageBreakdown.map((_, i) => (
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />

@@ -19,13 +19,14 @@ function parseSummaryJson(raw: string | null): Record<string, unknown> | null {
 }
 
 function countBy<T>(items: T[], key: (item: T) => string | null): { label: string; count: number }[] {
-  const map: Record<string, number> = {};
+  const map: Record<string, { count: number; label: string }> = {};
   for (const item of items) {
-    const k = key(item) ?? 'Unknown';
-    map[k] = (map[k] ?? 0) + 1;
+    const raw = key(item) ?? 'Unknown';
+    const k = raw.toLowerCase().trim();
+    if (!map[k]) map[k] = { count: 0, label: raw };
+    map[k].count++;
   }
-  return Object.entries(map)
-    .map(([label, count]) => ({ label, count }))
+  return Object.values(map)
     .sort((a, b) => b.count - a.count);
 }
 
@@ -126,24 +127,29 @@ export async function GET(req: NextRequest) {
 
     // ── Top issue categories ─────────────────────────────────────────────
     const allCategories = parsed.flatMap((p) => p.categories);
-    const categoryMap: Record<string, number> = {};
-    for (const c of allCategories) { categoryMap[c] = (categoryMap[c] ?? 0) + 1; }
-    const topCategories = Object.entries(categoryMap)
-      .map(([label, count]) => ({ label, count }))
+    const categoryMap: Record<string, { count: number; label: string }> = {};
+    for (const c of allCategories) {
+      const key = c.toLowerCase().trim();
+      if (!categoryMap[key]) categoryMap[key] = { count: 0, label: c };
+      categoryMap[key].count++;
+    }
+    const topCategories = Object.values(categoryMap)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .slice(0, 10)
+      .map(({ label, count }) => ({ label, count }));
 
     // ── Top issue items ──────────────────────────────────────────────────
     const allItems = parsed.flatMap((p) => p.items);
-    const itemMap: Record<string, { count: number; category: string }> = {};
+    const itemMap: Record<string, { count: number; label: string; category: string }> = {};
     for (const { item, category } of allItems) {
-      if (!itemMap[item]) itemMap[item] = { count: 0, category };
-      itemMap[item].count++;
+      const key = item.toLowerCase().trim();
+      if (!itemMap[key]) itemMap[key] = { count: 0, label: item, category };
+      itemMap[key].count++;
     }
-    const topItems = Object.entries(itemMap)
-      .map(([label, { count, category }]) => ({ label, count, category }))
+    const topItems = Object.values(itemMap)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .slice(0, 10)
+      .map(({ label, count, category }) => ({ label, count, category }));
 
     // ── Brand breakdown ──────────────────────────────────────────────────
     const brandBreakdown = countBy(

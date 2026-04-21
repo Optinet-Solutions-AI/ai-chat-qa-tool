@@ -414,8 +414,14 @@ export async function loadConversations(
     .order('analyzed_at', { ascending: false })
     .range(from, to);
 
-  if (filters.brand)                 query = query.eq('brand', filters.brand);
-  if (filters.agent_name)            query = query.eq('agent_name', filters.agent_name);
+  if (filters.brand) {
+    if (filters.brand.toLowerCase() === 'unknown') query = query.is('brand', null);
+    else                                           query = query.eq('brand', filters.brand);
+  }
+  if (filters.agent_name) {
+    if (filters.agent_name.toLowerCase() === 'unknown') query = query.is('agent_name', null);
+    else                                                query = query.eq('agent_name', filters.agent_name);
+  }
   if (filters.dateFrom)              query = query.gte('intercom_created_at', new Date(filters.dateFrom).toISOString());
   if (filters.dateTo) {
     const end = new Date(filters.dateTo);
@@ -458,8 +464,14 @@ function buildJsonFilterBaseQuery(fields: string, filters: ConversationFilters):
     .not('summary', 'is', null)
     .order('analyzed_at', { ascending: false });
 
-  if (filters.brand)                 q = q.eq('brand', filters.brand);
-  if (filters.agent_name)            q = q.eq('agent_name', filters.agent_name);
+  if (filters.brand) {
+    if (filters.brand.toLowerCase() === 'unknown') q = q.is('brand', null);
+    else                                           q = q.eq('brand', filters.brand);
+  }
+  if (filters.agent_name) {
+    if (filters.agent_name.toLowerCase() === 'unknown') q = q.is('agent_name', null);
+    else                                                q = q.eq('agent_name', filters.agent_name);
+  }
   if (filters.dateFrom)              q = q.gte('intercom_created_at', new Date(filters.dateFrom).toISOString());
   if (filters.dateTo) {
     const end = new Date(filters.dateTo);
@@ -502,7 +514,8 @@ export async function loadConversationsWithJsonFilter(
     const v = filters.resolution_status.toLowerCase();
     filtered = filtered.filter((r) => {
       const json = parseSummary(r.summary);
-      return (json?.resolution_status as string | null)?.toLowerCase() === v;
+      const val = (json?.resolution_status as string | null)?.trim();
+      return v === 'unknown' ? !val : val?.toLowerCase() === v;
     });
   }
 
@@ -510,16 +523,25 @@ export async function loadConversationsWithJsonFilter(
     const v = filters.dissatisfaction_severity.toLowerCase();
     filtered = filtered.filter((r) => {
       const json = parseSummary(r.summary);
-      return (json?.dissatisfaction_severity as string | null)?.toLowerCase() === v;
+      const val = (json?.dissatisfaction_severity as string | null)?.trim();
+      return v === 'unknown' ? !val : val?.toLowerCase() === v;
     });
   }
 
   if (filters.language) {
     const v = filters.language.toLowerCase();
-    filtered = filtered.filter((r) => {
-      const json = parseSummary(r.summary);
-      return (json?.language as string | null)?.toLowerCase() === v;
-    });
+    if (v === 'unknown') {
+      filtered = filtered.filter((r) => {
+        const json = parseSummary(r.summary);
+        const lang = (json?.language as string | null)?.trim();
+        return !lang;
+      });
+    } else {
+      filtered = filtered.filter((r) => {
+        const json = parseSummary(r.summary);
+        return (json?.language as string | null)?.toLowerCase() === v;
+      });
+    }
   }
 
   if (filters.issue_category) {
@@ -528,7 +550,10 @@ export async function loadConversationsWithJsonFilter(
       const json = parseSummary(r.summary);
       const results = Array.isArray(json?.results) ? json.results : [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return results.some((x: any) => (x.category ?? '').toLowerCase() === v);
+      return results.some((x: any) => {
+        const cat = (x.category as string | null)?.trim();
+        return v === 'unknown' ? !cat : cat?.toLowerCase() === v;
+      });
     });
   }
 
