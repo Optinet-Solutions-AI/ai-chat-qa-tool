@@ -417,7 +417,10 @@ export async function GET() {
   const refreshedMap = new Map(refreshed.map((j) => [j.id, j]));
   const merged = jobs.map((j) => refreshedMap.get(j.id) ?? j);
 
-  return NextResponse.json({ jobs: merged });
+  let unanalyzedCount = 0;
+  try { unanalyzedCount = await countUnanalyzedConversations(); } catch { /* non-fatal */ }
+
+  return NextResponse.json({ jobs: merged, unanalyzed_count: unanalyzedCount });
 }
 
 // ── PATCH: import results from a completed batch job ──────────────────────

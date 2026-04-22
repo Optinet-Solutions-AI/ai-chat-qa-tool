@@ -18,8 +18,11 @@ import { generateId } from '@/lib/utils';
 export const maxDuration = 300;
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const MAX_REQUESTS_PER_CHUNK = 10_000;
+const MAX_REQUESTS_PER_CHUNK = 2_500;
 const MAX_FILE_BYTES = 90 * 1024 * 1024;
+// Only submit 1 batch per cron run to stay under the enqueued-token org limit.
+// The cron runs every 2 hours, so the next run picks up where this one left off.
+const MAX_CHUNKS_PER_RUN = 1;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -313,7 +316,7 @@ export async function GET(req: NextRequest) {
           const totalChunks = chunks.length;
           const now = new Date().toISOString();
 
-          for (let i = 0; i < chunks.length; i++) {
+          for (let i = 0; i < chunks.length && newBatchJobs < MAX_CHUNKS_PER_RUN; i++) {
             const chunk = chunks[i];
             const jobId = generateId();
             try {

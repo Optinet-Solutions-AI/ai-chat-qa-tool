@@ -257,7 +257,6 @@ export default function BatchAnalysisPage() {
         try { message = (JSON.parse(text) as { error?: string }).error ?? message; } catch { /* plain-text error */ }
         throw new Error(message);
       }
-      const data = await res.json();
       await fetchJobs(true);
     } catch (e) {
       alert((e as Error).message);
@@ -336,6 +335,7 @@ export default function BatchAnalysisPage() {
             <li>Chunks are ≤10,000 requests and ≤90 MB — safe for all OpenAI API tiers</li>
             <li>Re-submitting is safe: already-analyzed conversations are skipped automatically</li>
             <li>If an import fails mid-way, click Import again — it resumes from where it stopped</li>
+            <li>The cron runs every 2 hours — completed batches are imported and new ones submitted automatically</li>
           </ul>
         </div>
 
@@ -404,7 +404,7 @@ export default function BatchAnalysisPage() {
             </p>
             {submitResult.remaining > 0 && (
               <p className="text-yellow-400">
-                {submitResult.remaining.toLocaleString()} conversations remaining — submit again after this batch completes.
+                {submitResult.remaining.toLocaleString()} conversations remaining — the cron will submit the next chunk automatically.
               </p>
             )}
           </div>
