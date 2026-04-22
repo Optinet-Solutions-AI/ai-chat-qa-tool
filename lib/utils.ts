@@ -31,3 +31,45 @@ export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + '…';
 }
+
+// ── Player attribute helpers (used in list + dashboard overlay) ──────────────
+
+import type { Conversation } from '@/lib/types';
+
+function getCustomAttr(attrs: Record<string, unknown> | null, ...keys: string[]): string | null {
+  if (!attrs) return null;
+  for (const key of keys) {
+    const lk = key.toLowerCase();
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k.toLowerCase() === lk && v != null && v !== '') return String(v);
+    }
+  }
+  return null;
+}
+
+export function getSegment(conv: Conversation): 'VIP' | 'NONVIP' | null {
+  const seg = getCustomAttr(conv.player_custom_attributes, 'Segment', 'segment', 'vip_segment', 'VIP Segment', 'Player Segment');
+  if (seg) {
+    const s = seg.toUpperCase().replace(/[\s-]/g, '');
+    if (s === 'VIP') return 'VIP';
+    if (s === 'NONVIP') return 'NONVIP';
+  }
+  const segs = conv.player_segments ?? [];
+  if (segs.some((s) => /^vip$/i.test(s.trim()))) return 'VIP';
+  if (segs.some((s) => /non.?vip/i.test(s))) return 'NONVIP';
+  return null;
+}
+
+export function getVipLevel(conv: Conversation): string | null {
+  return getCustomAttr(
+    conv.player_custom_attributes,
+    'VIP Level', 'vip_level', 'VIPLevel', 'Player Level', 'player_level', 'Level',
+  );
+}
+
+export function getAccountManager(conv: Conversation): string | null {
+  return getCustomAttr(
+    conv.player_custom_attributes,
+    'Account Manager', 'account_manager', 'AccountManager', 'AM', 'Account Mgr',
+  );
+}

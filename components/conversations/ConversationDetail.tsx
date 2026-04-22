@@ -170,9 +170,11 @@ interface Props {
   analysisRun?: AnalysisRun;
   /** Hide Run QA / Delete actions when viewing a read-only historical run */
   readOnly?: boolean;
+  /** When provided, back arrow calls this instead of router.back() (e.g. close a drawer) */
+  onClose?: () => void;
 }
 
-export default function ConversationDetail({ conversation, analysisRun, readOnly = false }: Props) {
+export default function ConversationDetail({ conversation, analysisRun, readOnly = false, onClose }: Props) {
   const router = useRouter();
   const { deleteConversation, updateConversation, addNote, updateNote, deleteNote, addPrompt, currentUser, prompts } = useStore();
   const { toast } = useToast();
@@ -729,7 +731,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
           {/* Row 1: back · title · actions */}
           <div className="flex items-center gap-2 px-4 sm:px-6 py-3 min-w-0">
             <button
-              onClick={() => router.back()}
+              onClick={() => onClose ? onClose() : router.back()}
               className="flex items-center gap-1 text-slate-400 hover:text-slate-700 transition-colors shrink-0"
             >
               <IconArrowLeft />

@@ -6,12 +6,73 @@ import { useStore } from '@/lib/store';
 import { useToast } from '@/components/layout/ToastProvider';
 import { useConfirm } from '@/components/layout/ConfirmProvider';
 import { dbDeleteConversation } from '@/lib/db-client';
+import { getSegment, getVipLevel, getAccountManager } from '@/lib/utils';
 import type { Conversation } from '@/lib/types';
 import type { ConversationFilters } from '@/lib/db';
-import ConversationCard from './ConversationCard';
 import BulkAnalysisModal from './BulkAnalysisModal';
+import ConversationDetail from './ConversationDetail';
 
-const PER_PAGE = 24;
+const PER_PAGE = 50;
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toISOString().slice(0, 10);
+  } catch { return iso; }
+}
+
+// ── Language detection ───────────────────────────────────────────────────────
+// Uses the AI-analysed language field when available; falls back to a
+// character + stop-word heuristic on the conversation's text fields.
+
+const STOP_WORDS: Record<string, RegExp> = {
+  Norwegian: /\b(og|jeg|det|ikke|du|har|kan|vil|deg|hva|men|også|med|for|er|på|til|av|fra|hei|takk|vennligst|venter)\b/,
+  Danish:    /\b(og|jeg|det|ikke|du|har|kan|vil|dig|hvad|men|også|med|for|er|på|til|af|fra|hej|tak|venligst)\b/,
+  Swedish:   /\b(och|jag|det|inte|du|har|kan|vill|dig|vad|men|också|med|för|är|på|till|av|från|hej|tack|vänligen)\b/,
+  Finnish:   /\b(ja|ei|on|se|en|ole|että|kun|tai|jos|niin|hän|olla|minä|sinä|tämä|voit|kiitos)\b/,
+  German:    /\b(und|ich|das|nicht|du|hat|kann|will|dich|was|aber|auch|mit|für|ist|auf|zu|von|aus|hallo|danke|bitte|warten|möchtest|wissen)\b/,
+  French:    /\b(et|je|le|la|les|du|de|un|une|est|en|pour|avec|que|qui|dans|sur|pas|plus|aussi|bonjour|merci|attendre)\b/,
+  Spanish:   /\b(y|yo|el|la|los|las|de|un|una|es|en|que|se|para|con|por|también|pero|hola|gracias|esperar)\b/,
+  Portuguese:/\b(e|eu|o|a|os|as|de|um|uma|é|em|que|se|para|com|por|não|também|mas|olá|obrigado|aguardar)\b/,
+  Italian:   /\b(e|io|il|la|le|lo|di|un|una|è|in|che|per|con|non|si|sono|ma|come|ciao|grazie|attendere)\b/,
+  Dutch:     /\b(en|ik|de|het|een|van|in|is|dat|te|die|niet|zijn|op|aan|met|ook|bij|maar|hallo|bedankt|wachten)\b/,
+  English:   /\b(the|and|is|in|it|of|to|a|that|for|on|are|with|this|was|be|have|from|or|by|what|your|you|we|can|will|not|do|how|hello|thank|please|wait)\b/,
+};
+
+function detectLanguage(text: string): string | null {
+  if (!text || text.trim().length < 4) return null;
+  const t = text.toLowerCase();
+
+  // Character-based shortcuts for unambiguous scripts
+  if (/[øØ]/.test(t) && /[æÆ]/.test(t) && !/[äÄ]/.test(t) && !/[üÜ]/.test(t)) {
+    // ø + æ → Norwegian or Danish; stop words disambiguate
+    if (STOP_WORDS.Norwegian.test(t)) return 'Norwegian';
+    if (STOP_WORDS.Danish.test(t))    return 'Danish';
+    return 'Norwegian';
+  }
+  if (/ß/.test(t))                                           return 'German';
+  if (/[åÅ]/.test(t) && /[äÄöÖ]/.test(t) && !/[øØ]/.test(t)) return 'Swedish';
+  if (/[üÜ]/.test(t) && (/[öÖ]/.test(t) || /[äÄ]/.test(t))) return 'German';
+
+  // Stop-word scoring — pick the language with the most matches
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const [lang, re] of Object.entries(STOP_WORDS)) {
+    const matches = (t.match(new RegExp(re.source, 'g')) ?? []).length;
+    if (matches > bestScore) { bestScore = matches; best = lang; }
+  }
+  return bestScore >= 2 ? best : null;
+}
+
+function getLanguage(conv: Conversation): string | null {
+  if (conv.language) return conv.language;
+  const text = [conv.title, conv.ai_subject, conv.ai_issue_summary, conv.query_type]
+    .filter(Boolean).join(' ');
+  return detectLanguage(text);
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
 
 function IconChat() {
   return (
@@ -45,10 +106,40 @@ function IconChevronRight() {
   );
 }
 
+function IconCheck() {
+  return (
+    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+  );
+}
+
+function IconAlert() {
+  return (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
 function FilterTag({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
       {label}
+    </span>
+  );
+}
+
+function SegmentBadge({ segment }: { segment: 'VIP' | 'NONVIP' }) {
+  return segment === 'VIP' ? (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold tracking-wide bg-blue-50 text-blue-600">
+      VIP
+    </span>
+  ) : (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold tracking-wide bg-amber-50 text-amber-600">
+      NONVIP
     </span>
   );
 }
@@ -67,6 +158,8 @@ function getPageNumbers(current: number, totalPages: number): (number | '...')[]
   return pages;
 }
 
+// ── Main component ───────────────────────────────────────────────────────────
+
 export default function ConversationList({ filters }: { filters?: ConversationFilters }) {
   const { deleteConversation } = useStore();
   const storeConvCount = useStore((s) => s.conversations.length);
@@ -82,6 +175,30 @@ export default function ConversationList({ filters }: { filters?: ConversationFi
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkAnalysis, setShowBulkAnalysis] = useState(false);
+
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewConv, setPreviewConv] = useState<import('@/lib/types').Conversation | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const openPreview = useCallback(async (id: string) => {
+    setPreviewId(id);
+    setPreviewConv(null);
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/conversations/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewConv(data.conversation);
+      }
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, []);
+
+  const closePreview = useCallback(() => {
+    setPreviewId(null);
+    setPreviewConv(null);
+  }, []);
 
   const fetchPage = useCallback(async (p: number) => {
     setLoading(true);
@@ -111,29 +228,20 @@ export default function ConversationList({ filters }: { filters?: ConversationFi
 
   useEffect(() => { fetchPage(0); }, [fetchPage]);
 
-  // Refetch page 0 when a new conversation is added to the store
   const prevStoreCount = useRef(storeConvCount);
   useEffect(() => {
-    if (storeConvCount > prevStoreCount.current) {
-      fetchPage(0);
-    }
+    if (storeConvCount > prevStoreCount.current) fetchPage(0);
     prevStoreCount.current = storeConvCount;
   }, [storeConvCount, fetchPage]);
 
   const enterSelectMode = () => setSelectMode(true);
-
-  const cancelSelectMode = () => {
-    setSelectMode(false);
-    setSelected(new Set());
-  };
-
+  const cancelSelectMode = () => { setSelectMode(false); setSelected(new Set()); };
   const clearSelection = () => setSelected(new Set());
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
@@ -143,10 +251,7 @@ export default function ConversationList({ filters }: { filters?: ConversationFi
     if (!await confirm(`Delete ${selected.size} conversation(s)?`, { danger: true, confirmLabel: 'Delete' })) return;
     const count = selected.size;
     const ids = Array.from(selected);
-    ids.forEach((id) => {
-      deleteConversation(id);
-      dbDeleteConversation(id);
-    });
+    ids.forEach((id) => { deleteConversation(id); dbDeleteConversation(id); });
     cancelSelectMode();
     toast(`${count} conversation(s) deleted`, 'success');
     const newTotal = total - count;
@@ -190,12 +295,33 @@ export default function ConversationList({ filters }: { filters?: ConversationFi
         />
       )}
 
+      {/* Slide-over drawer */}
+      {previewId && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/30 z-40"
+            onClick={closePreview}
+          />
+          {/* Panel */}
+          <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-[90vw] max-w-7xl bg-white shadow-2xl">
+            {previewLoading || !previewConv ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : (
+              <ConversationDetail conversation={previewConv} onClose={closePreview} />
+            )}
+          </div>
+        </>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-slate-100 bg-white flex-shrink-0">
         {selectMode ? (
           <>
             <span className="text-sm font-medium text-slate-700">
-              {selected.size > 0 ? `${selected.size} selected` : 'Tap cards to select'}
+              {selected.size > 0 ? `${selected.size} selected` : 'Click rows to select'}
             </span>
             <div className="flex items-center gap-2">
               {selected.size > 0 && (
@@ -277,32 +403,191 @@ export default function ConversationList({ filters }: { filters?: ConversationFi
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {conversations.map((conv) => (
-                <ConversationCard
-                  key={conv.id}
-                  conversation={conv}
-                  href={`/conversations/${conv.id}`}
-                  selectMode={selectMode}
-                  selected={selected.has(conv.id)}
-                  onToggleSelect={() => toggleSelect(conv.id)}
-                  onClick={() => router.push(`/conversations/${conv.id}`)}
-                  onDelete={(e) => handleDeleteOne(conv.id, e)}
-                />
-              ))}
-            </div>
+            <table className="w-full text-sm border-collapse min-w-[900px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  {selectMode && (
+                    <th className="w-10 px-3 py-2.5 text-left">
+                      <input
+                        type="checkbox"
+                        checked={selected.size === conversations.length && conversations.length > 0}
+                        onChange={(e) =>
+                          e.target.checked
+                            ? setSelected(new Set(conversations.map((c) => c.id)))
+                            : clearSelection()
+                        }
+                        className="rounded border-slate-300 text-blue-600"
+                      />
+                    </th>
+                  )}
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Date</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Category</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Issue</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Segment</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">VIP Level</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Chat Agent</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Account Manager</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Brand</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Language</th>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Actions</th>
+                  {!selectMode && <th className="w-8" />}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {conversations.map((conv) => {
+                  const segment = getSegment(conv);
+                  const vipLevel = getVipLevel(conv);
+                  const accountManager = getAccountManager(conv);
+                  const isSelected = selected.has(conv.id);
+
+                  return (
+                    <tr
+                      key={conv.id}
+                      onClick={(e) => {
+                        if (selectMode) { toggleSelect(conv.id); return; }
+                        if (e.ctrlKey || e.metaKey) {
+                          window.open(`/conversations/${conv.id}`, '_blank');
+                          return;
+                        }
+                        openPreview(conv.id);
+                      }}
+                      onMouseDown={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault();
+                          window.open(`/conversations/${conv.id}`, '_blank');
+                        }
+                      }}
+                      className={[
+                        'group cursor-pointer transition-colors',
+                        isSelected
+                          ? 'bg-blue-50'
+                          : 'hover:bg-slate-50',
+                        conv.is_alert_worthy ? 'border-l-2 border-l-red-400' : '',
+                      ].join(' ')}
+                    >
+                      {selectMode && (
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <div
+                            onClick={() => toggleSelect(conv.id)}
+                            className={[
+                              'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all cursor-pointer',
+                              isSelected ? 'bg-blue-500 border-blue-500 text-white' : 'border-slate-300 bg-white',
+                            ].join(' ')}
+                          >
+                            {isSelected && <IconCheck />}
+                          </div>
+                        </td>
+                      )}
+
+                      {/* Date */}
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-500 text-xs">
+                        {fmtDate(conv.intercom_created_at)}
+                      </td>
+
+                      {/* Category */}
+                      <td className="px-3 py-2.5 max-w-[180px]">
+                        <span className="block truncate text-slate-700" title={conv.issue_category ?? undefined}>
+                          {conv.issue_category ?? <span className="text-slate-300">—</span>}
+                        </span>
+                      </td>
+
+                      {/* Issue */}
+                      <td className="px-3 py-2.5 max-w-[200px]">
+                        <div className="flex items-center gap-1.5">
+                          {conv.is_alert_worthy && (
+                            <span className="text-red-500 shrink-0" title={conv.alert_reason ?? 'Alert'}>
+                              <IconAlert />
+                            </span>
+                          )}
+                          <span className="block truncate text-slate-800 font-medium" title={conv.query_type ?? conv.title}>
+                            {conv.query_type || conv.title || <span className="text-slate-300 font-normal">—</span>}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Segment */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {segment ? <SegmentBadge segment={segment} /> : <span className="text-slate-300 text-xs">—</span>}
+                      </td>
+
+                      {/* VIP Level */}
+                      <td className="px-3 py-2.5 max-w-[160px]">
+                        <span className="block truncate text-slate-600 text-xs" title={vipLevel ?? undefined}>
+                          {vipLevel ?? <span className="text-slate-300">—</span>}
+                        </span>
+                      </td>
+
+                      {/* Chat Agent */}
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-600 text-xs">
+                        {conv.agent_name ?? <span className="text-slate-300">—</span>}
+                      </td>
+
+                      {/* Account Manager */}
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-600 text-xs">
+                        {accountManager ?? <span className="text-slate-300">—</span>}
+                      </td>
+
+                      {/* Brand */}
+                      <td className="px-3 py-2.5 max-w-[120px]">
+                        <span className="block truncate text-slate-600 text-xs" title={conv.brand ?? undefined}>
+                          {conv.brand ?? <span className="text-slate-300">—</span>}
+                        </span>
+                      </td>
+
+                      {/* Language */}
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-600 text-xs">
+                        {getLanguage(conv) ?? <span className="text-slate-300">—</span>}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`/conversations/${conv.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
+                          >
+                            Chat
+                          </a>
+                          <span className="text-slate-200">·</span>
+                          <span
+                            className="text-[11px] font-medium text-slate-400 hover:text-slate-600 whitespace-nowrap cursor-pointer"
+                          >
+                            Account
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Delete action */}
+                      {!selectMode && (
+                        <td className="px-2 py-2.5">
+                          <button
+                            onClick={(e) => handleDeleteOne(conv.id, e)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <IconTrash />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-6">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-t border-slate-100 bg-white">
                 <p className="text-xs text-slate-400">
                   Page {page + 1} of {totalPages} — {total} conversations
                 </p>

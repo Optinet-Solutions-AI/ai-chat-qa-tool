@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Conversation } from '@/lib/types';
+import { getSegment, getVipLevel, getAccountManager } from '@/lib/utils';
 
 interface Props {
   filters: Record<string, string>;
@@ -126,6 +127,9 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Issue</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Agent</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Brand</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Segment</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">VIP Level</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Account Manager</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Severity</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Resolution</th>
                 </tr>
@@ -134,7 +138,16 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                 {conversations.map((conv) => (
                   <tr
                     key={conv.id}
-                    className="hover:bg-blue-50/40 transition-colors group"
+                    className="hover:bg-blue-50/40 transition-colors group cursor-pointer"
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) window.open(`/conversations/${conv.id}`, '_blank');
+                    }}
+                    onMouseDown={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        window.open(`/conversations/${conv.id}`, '_blank');
+                      }
+                    }}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-500">
                       {fmtDate(conv.intercom_created_at)}
@@ -165,6 +178,23 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
                       {conv.brand ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {(() => {
+                        const seg = getSegment(conv);
+                        if (!seg) return <span className="text-xs text-slate-300">—</span>;
+                        return seg === 'VIP'
+                          ? <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600">VIP</span>
+                          : <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-600">NONVIP</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 max-w-[140px]">
+                      <span className="text-xs text-slate-600 truncate block" title={getVipLevel(conv) ?? undefined}>
+                        {getVipLevel(conv) ?? <span className="text-slate-300">—</span>}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
+                      {getAccountManager(conv) ?? <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {conv.dissatisfaction_severity ? (
