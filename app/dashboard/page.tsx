@@ -38,8 +38,10 @@ interface DashboardData {
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+function yesterdayISO() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function getCached(key: string): DashboardData | null {
@@ -259,9 +261,9 @@ export default function DashboardPage() {
   const [overlayFilters, setOverlayFilters] = useState<Record<string, string> | null>(null);
   const [overlayTitle, setOverlayTitle]     = useState('');
 
-  // Filters — default to today so the dashboard opens on today's stats
-  const [dateFrom, setDateFrom]       = useState(todayISO);
-  const [dateTo, setDateTo]           = useState(todayISO);
+  // Filters — default to yesterday so the dashboard opens with populated data
+  const [dateFrom, setDateFrom]       = useState(yesterdayISO);
+  const [dateTo, setDateTo]           = useState(yesterdayISO);
   const [brand, setBrand]             = useState('');
   const [agent, setAgent]             = useState('');
   const [categories, setCategories]   = useState<string[]>([]);
