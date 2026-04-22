@@ -288,10 +288,8 @@ export async function GET(req: NextRequest) {
       for (const r of filteredRows) {
         const iso = r.intercom_created_at as string | null;
         if (!iso) continue;
-        // Convert UTC → CEST (UTC+2) and take YYYY-MM-DD
-        const cestDate = new Date(new Date(iso).getTime() + 2 * 60 * 60 * 1000)
-          .toISOString().slice(0, 10);
-        dateCounts[cestDate] = (dateCounts[cestDate] ?? 0) + 1;
+        const utcDate = new Date(iso).toISOString().slice(0, 10);
+        dateCounts[utcDate] = (dateCounts[utcDate] ?? 0) + 1;
       }
       conversationsByDate = Object.entries(dateCounts)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -309,13 +307,13 @@ export async function GET(req: NextRequest) {
       }));
     }
 
-    // Limit to last 30 days when no dateFrom filter, and fill gaps with 0 through today (CEST)
+    // Limit to last 30 days when no dateFrom filter, and fill gaps with 0 through today (UTC)
     {
-      const todayCEST = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const endDate   = dateTo && dateTo < todayCEST ? dateTo : todayCEST;
+      const todayUTC  = new Date().toISOString().slice(0, 10);
+      const endDate   = dateTo && dateTo < todayUTC ? dateTo : todayUTC;
       const startDate = dateFrom
         ? (conversationsByDate[0]?.date ?? endDate)
-        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const countByDate = Object.fromEntries(conversationsByDate.map((d) => [d.date, d.count]));
       const filled: { date: string; count: number }[] = [];
       const start = new Date(startDate + 'T00:00:00Z');

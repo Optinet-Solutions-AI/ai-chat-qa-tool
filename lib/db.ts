@@ -328,7 +328,7 @@ export async function getExistingIntercomIds(ids: string[]): Promise<Set<string>
     .from('conversations')
     .select('intercom_id')
     .in('intercom_id', ids);
-  if (error) return new Set();
+  if (error) throw new Error(`[db] getExistingIntercomIds: ${error.message}`);
   return new Set((data ?? []).map((r) => r.intercom_id).filter(Boolean));
 }
 

@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     const results: { id: string; status: 'saved' | 'updated' | 'skipped' | 'error'; error?: string }[] = [];
     let errorCount = 0;
 
-    await Promise.allSettled(ids.map(async (intercomId) => {
+    for (const intercomId of ids) {
       try {
         const data = await fetchIntercomData(intercomId, apiKey);
         const conv = buildConversation(data);
@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
           results.push({ id: intercomId, status: 'updated' });
         } else {
           await dbInsertConversation(conv);
+          existingIds.add(intercomId); // guard against duplicate IDs within the same batch
           results.push({ id: intercomId, status: 'saved' });
         }
       } catch (e) {
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
         results.push({ id: intercomId, status: 'error', error: (e as Error).message });
         console.error(`[sync] ${intercomId}:`, (e as Error).message);
       }
-    }));
+    }
 
     // Update done count in Supabase
     try {

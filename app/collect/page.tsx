@@ -62,10 +62,10 @@ function yesterday(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fmtCest(iso: string | null): string {
+function fmtUtc(iso: string | null): string {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Paris',
+    timeZone: 'UTC',
     day: '2-digit', month: 'short',
     hour: '2-digit', minute: '2-digit',
   }).format(new Date(iso));
@@ -513,7 +513,7 @@ export default function CollectPage() {
                     <th className="px-4 py-3 w-8">
                       <input type="checkbox" checked={rows.length > 0 && selected.size === rows.length} onChange={toggleAll} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                     </th>
-                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">Time (CEST)</th>
+                    <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">Time (UTC)</th>
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Subject</th>
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Player</th>
                     <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Brand</th>
@@ -536,7 +536,7 @@ export default function CollectPage() {
                           <td className="px-4 py-3">
                             <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleSelect(row.id)} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                           </td>
-                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtCest(row.intercom_created_at)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtUtc(row.intercom_created_at)}</td>
                           <td className="px-4 py-3 max-w-[220px]">
                             <p className="text-xs font-medium text-slate-800 truncate">{row.title}</p>
                             {row.intercom_id && <p className="text-[10px] text-slate-400">#{row.intercom_id}</p>}
