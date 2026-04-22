@@ -132,6 +132,7 @@ export default function AddConversationModal({ onClose }: Props) {
       alert_reason: existing?.alert_reason ?? null,
 
       original_text: r.transcript,
+      raw_messages: existing?.raw_messages ?? null,
       last_prompt_id: existing?.last_prompt_id ?? null,
       last_prompt_content: existing?.last_prompt_content ?? null,
       notes: existing?.notes ?? [],
