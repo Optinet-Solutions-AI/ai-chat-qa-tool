@@ -34,6 +34,34 @@ interface DashboardData {
   filterOptions: { brands: string[]; agents: string[]; categories: string[]; issues: { category: string; items: string[] }[] };
 }
 
+// ── Cache helpers ──────────────────────────────────────────────────────────
+
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getCached(key: string): DashboardData | null {
+  try {
+    const raw = sessionStorage.getItem(`dashboard:${key}`);
+    if (!raw) return null;
+    const { data, fetchedAt } = JSON.parse(raw) as { data: DashboardData; fetchedAt: number };
+    if (Date.now() - fetchedAt > CACHE_TTL) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function setCached(key: string, data: DashboardData) {
+  try {
+    sessionStorage.setItem(`dashboard:${key}`, JSON.stringify({ data, fetchedAt: Date.now() }));
+  } catch {
+    // ignore quota errors
+  }
+}
+
 // ── Colour palette ─────────────────────────────────────────────────────────
 
 const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#f97316', '#84cc16'];
@@ -231,9 +259,9 @@ export default function DashboardPage() {
   const [overlayFilters, setOverlayFilters] = useState<Record<string, string> | null>(null);
   const [overlayTitle, setOverlayTitle]     = useState('');
 
-  // Filters
-  const [dateFrom, setDateFrom]       = useState('');
-  const [dateTo, setDateTo]           = useState('');
+  // Filters — default to today so the dashboard opens on today's stats
+  const [dateFrom, setDateFrom]       = useState(todayISO);
+  const [dateTo, setDateTo]           = useState(todayISO);
   const [brand, setBrand]             = useState('');
   const [agent, setAgent]             = useState('');
   const [categories, setCategories]   = useState<string[]>([]);
@@ -266,21 +294,38 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFrom, dateTo, brand, agent, categories, issues]);
 
+  const forceRef = useRef(false);
+
   const fetchData = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo)   params.set('dateTo',   dateTo);
+    if (brand)    params.set('brand',    brand);
+    if (agent)    params.set('agent',    agent);
+    categories.forEach((c) => params.append('category', c));
+    issues.forEach((i) => params.append('issue', i));
+
+    const cacheKey = params.toString();
+
+    if (!forceRef.current) {
+      const cached = getCached(cacheKey);
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+    }
+    forceRef.current = false;
+
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo)   params.set('dateTo',   dateTo);
-      if (brand)    params.set('brand',    brand);
-      if (agent)    params.set('agent',    agent);
-      categories.forEach((c) => params.append('category', c));
-      issues.forEach((i) => params.append('issue', i));
-
       const res = await fetch(`/api/dashboard?${params}`);
       if (!res.ok) throw new Error('Failed to load dashboard');
-      setData(await res.json());
+      const json = await res.json();
+      setCached(cacheKey, json);
+      setData(json);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -323,7 +368,7 @@ export default function DashboardPage() {
           <p className="text-sm text-slate-400 mt-0.5">QA insights from collected conversations</p>
         </div>
         <button
-          onClick={fetchData}
+          onClick={() => { forceRef.current = true; fetchData(); }}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
