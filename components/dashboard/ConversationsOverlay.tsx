@@ -10,19 +10,6 @@ interface Props {
   onClose: () => void;
 }
 
-const SEVERITY_COLOR: Record<string, string> = {
-  Low:      'bg-green-100 text-green-700',
-  Medium:   'bg-amber-100 text-amber-700',
-  High:     'bg-orange-100 text-orange-700',
-  Critical: 'bg-red-100 text-red-700',
-};
-
-const RESOLUTION_COLOR: Record<string, string> = {
-  Resolved:            'bg-green-100 text-green-700',
-  'Partially Resolved': 'bg-amber-100 text-amber-700',
-  Unresolved:          'bg-red-100 text-red-700',
-};
-
 const PER_PAGE = 50;
 
 export default function ConversationsOverlay({ filters, title, onClose }: Props) {
@@ -122,46 +109,22 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
               <thead className="sticky top-0 bg-slate-50 z-10">
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Player</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Category</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Issue</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Agent</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Brand</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Segment</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">VIP Level</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Chat Agent</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Account Manager</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Severity</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Resolution</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Brand</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Language</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Links</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {conversations.map((conv) => (
-                  <tr
-                    key={conv.id}
-                    className="hover:bg-blue-50/40 transition-colors group cursor-pointer"
-                    onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey) window.open(`/conversations/${conv.id}`, '_blank');
-                    }}
-                    onMouseDown={(e) => {
-                      if (e.button === 1) {
-                        e.preventDefault();
-                        window.open(`/conversations/${conv.id}`, '_blank');
-                      }
-                    }}
-                  >
+                  <tr key={conv.id} className="hover:bg-blue-50/40 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-500">
                       {fmtDate(conv.intercom_created_at)}
-                    </td>
-                    <td className="px-4 py-3 max-w-[140px]">
-                      <a
-                        href={`/conversations/${conv.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline truncate block"
-                        title={conv.player_name ?? conv.title}
-                      >
-                        {conv.player_name ?? conv.title ?? conv.id}
-                      </a>
                     </td>
                     <td className="px-4 py-3 max-w-[160px]">
                       <span className="text-xs text-slate-600 truncate block" title={conv.issue_category ?? ''}>
@@ -172,12 +135,6 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                       <span className="text-xs text-slate-500 truncate block" title={conv.ai_issue_summary ?? ''}>
                         {conv.ai_issue_summary ?? '—'}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
-                      {conv.agent_name ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
-                      {conv.brand ?? '—'}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {(() => {
@@ -194,21 +151,54 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
+                      {conv.agent_name ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
                       {getAccountManager(conv) ?? <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {conv.dissatisfaction_severity ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SEVERITY_COLOR[conv.dissatisfaction_severity] ?? 'bg-slate-100 text-slate-600'}`}>
-                          {conv.dissatisfaction_severity}
-                        </span>
-                      ) : <span className="text-xs text-slate-300">—</span>}
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
+                      {conv.brand ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
+                      {conv.language ?? '—'}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {conv.resolution_status ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${RESOLUTION_COLOR[conv.resolution_status] ?? 'bg-slate-100 text-slate-600'}`}>
-                          {conv.resolution_status}
-                        </span>
-                      ) : <span className="text-xs text-slate-300">—</span>}
+                      <div className="flex items-center gap-2">
+                        {conv.intercom_id ? (
+                          <a
+                            href={`https://app.intercom.com/a/conversations/${conv.intercom_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-semibold text-sky-600 hover:text-sky-800 hover:underline"
+                          >
+                            Chat
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">Chat</span>
+                        )}
+                        <span className="text-slate-200 select-none">·</span>
+                        {conv.player_id ? (
+                          <a
+                            href={`https://app.intercom.com/a/contacts/${conv.player_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-semibold text-sky-600 hover:text-sky-800 hover:underline"
+                          >
+                            Account
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">Account</span>
+                        )}
+                        <span className="text-slate-200 select-none">·</span>
+                        <a
+                          href={`/conversations/${conv.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                        >
+                          Analysis
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))}

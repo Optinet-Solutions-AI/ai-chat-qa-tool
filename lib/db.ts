@@ -52,7 +52,7 @@ function mapConversationRow(c: Record<string, any>, notes: ConversationNote[] = 
     dissatisfaction_severity: c.dissatisfaction_severity ?? null,
     issue_category: c.issue_category ?? null,
     resolution_status: c.resolution_status ?? null,
-    language: c.language ?? null,
+    language: c.language ?? (parseSummary(c.summary)?.language as string | null) ?? null,
     agent_performance_score: c.agent_performance_score ?? null,
     agent_performance_notes: c.agent_performance_notes ?? null,
     key_quotes: c.key_quotes ?? null,
