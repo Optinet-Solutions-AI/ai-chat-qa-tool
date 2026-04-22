@@ -82,6 +82,7 @@ async function backfillDate(date: string, apiKey: string): Promise<{ saved: numb
           median_time_to_reply: data.median_time_to_reply,
           count_reopens: data.count_reopens,
           original_text: data.transcript,
+          raw_messages: data.raw_messages,
           notes: [],
           sentiment: null, summary: null, dissatisfaction_severity: null,
           issue_category: null, resolution_status: null, language: null,

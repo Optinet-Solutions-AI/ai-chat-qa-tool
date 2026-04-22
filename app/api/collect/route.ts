@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
         count_reopens: data.count_reopens,
 
         original_text: data.transcript,
+        raw_messages: data.raw_messages,
         notes: [],
 
         sentiment: null,
