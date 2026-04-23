@@ -155,7 +155,12 @@ export default function CollectPage() {
   const { toast } = useToast();
   const confirm = useConfirm();
 
-  const [date, setDate] = useState(yesterday());
+  const [date, setDate] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('collect-date') || yesterday();
+    }
+    return yesterday();
+  });
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
 
@@ -440,7 +445,7 @@ export default function CollectPage() {
               type="date"
               value={date}
               max={yesterday()}
-              onChange={(e) => { setDate(e.target.value); setSelected(new Set()); }}
+              onChange={(e) => { setDate(e.target.value); localStorage.setItem('collect-date', e.target.value); setSelected(new Set()); }}
               className="border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
