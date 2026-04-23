@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery } from './types';
 import { cestDateToUnixRange } from './intercom';
+import { getAmGroupsForFilter } from './utils';
 
 // ── Shared row mapper ──────────────────────────────────────────────────────
 
