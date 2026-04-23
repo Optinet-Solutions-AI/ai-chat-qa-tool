@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
 
     // ── Brand breakdown ──────────────────────────────────────────────────
     const brandBreakdown = countBy(
-      filteredRows,
+      filteredRows.filter((r) => (r.brand as string | null)?.toLowerCase() !== 'rooster partners'),
       (r) => (r.brand as string | null)
     ).slice(0, 15);
 
@@ -345,7 +345,7 @@ export async function GET(req: NextRequest) {
       .select('agent_name')
       .not('agent_name', 'is', null) as { data: Array<{ agent_name: string }> | null };
 
-    const uniqueBrands = [...new Set((allBrands ?? []).map((r) => r.brand))].sort();
+    const uniqueBrands = [...new Set((allBrands ?? []).map((r) => r.brand))].filter((b) => b?.toLowerCase() !== 'rooster partners').sort();
     const uniqueAgents = [...new Set((allAgents ?? []).map((r) => r.agent_name))].sort();
 
     // When a category filter is active, the DB-level counts are global (the RPC
