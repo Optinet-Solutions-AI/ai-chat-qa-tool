@@ -84,13 +84,13 @@ function IconDashboard() {
 }
 
 const NAV_ITEMS = [
+  { href: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
+  { href: '/ask-ai', label: 'Ask AI', icon: <IconSparkle /> },
   { href: '/', label: 'Conversations', icon: <IconChat /> },
   { href: '/collect', label: 'Collect', icon: <IconCollect /> },
   { href: '/prompts', label: 'Prompt Library', icon: <IconDocument /> },
   { href: '/analysis-history', label: 'Analysis History', icon: <IconHistory /> },
   { href: '/batch-analysis', label: 'Batch Analysis', icon: <IconBatch /> },
-  { href: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
-  { href: '/ask-ai', label: 'Ask AI', icon: <IconSparkle /> },
 ];
 
 export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, onToggleCollapse }: SidebarProps) {
