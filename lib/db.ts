@@ -142,7 +142,14 @@ function conversationRow(c: Conversation) {
 
 export async function dbInsertConversation(c: Conversation): Promise<void> {
   const { error } = await supabase.from('conversations').insert(conversationRow(c));
-  if (error) throw new Error(`[db] insert conversation: ${error.message} (code: ${error.code}, details: ${error.details})`);
+  if (error) {
+    // Unique constraint violation on intercom_id — another row already exists, update it instead
+    if (error.code === '23505' && c.intercom_id) {
+      await dbUpdateConversationByIntercomId(c);
+      return;
+    }
+    throw new Error(`[db] insert conversation: ${error.message} (code: ${error.code}, details: ${error.details})`);
+  }
 }
 
 export async function dbUpdateConversation(c: Conversation): Promise<void> {
