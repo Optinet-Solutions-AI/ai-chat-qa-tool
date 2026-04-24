@@ -258,6 +258,21 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
   // ── Backfilled messages (with timestamps) ──────────────────────────────────
   const [refreshedMessages, setRefreshedMessages] = useState<RawMessage[] | null>(null);
 
+  // ── Translation state ──────────────────────────────────────────────────────
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [translatedMessages, setTranslatedMessages] = useState<RawMessage[] | null>(
+    conversation.raw_messages_translated,
+  );
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  useEffect(() => {
+    setTranslatedMessages(conversation.raw_messages_translated);
+    setShowTranslation(false);
+  // Reset on conversation change only — depending on raw_messages_translated
+  // would flip the toggle off the moment our own translate call updates the store.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id]);
+
   // Auto-refetch raw_messages from Intercom if stored messages lack timestamps.
   // Older rows were collected before message timestamps were captured; this
   // silently backfills them so response-time deltas render on the transcript.
@@ -579,6 +594,43 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
     </div>
   );
 
+  const handleToggleTranslation = async () => {
+    // Turning off is instant
+    if (showTranslation) {
+      setShowTranslation(false);
+      return;
+    }
+
+    // Already cached — flip on immediately
+    if (translatedMessages && translatedMessages.length > 0) {
+      setShowTranslation(true);
+      return;
+    }
+
+    if (!conv.raw_messages || conv.raw_messages.length === 0) {
+      toast('No messages to translate', 'error');
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      const res = await fetch(`/api/conversations/${conv.id}/translate`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? 'Translation failed');
+      }
+      const data = await res.json() as { raw_messages_translated: RawMessage[] };
+      setTranslatedMessages(data.raw_messages_translated);
+      setShowTranslation(true);
+      // Keep in-memory store in sync so the translation survives panel toggles
+      updateConversation({ ...conv, raw_messages_translated: data.raw_messages_translated });
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   // Build structured messages from raw_messages, falling back to parsing original_text.
   // Prefer freshly-refetched messages (with timestamps) when available.
   const chatMessages: { author_type: string; body: string; created_at?: string | null }[] = (() => {
@@ -629,6 +681,9 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
         const label   = isAgent ? 'Agent' : isBot ? 'Bot' : 'Player';
         const time    = fmtMsgTime(msg.created_at);
         const gap     = i > 0 ? fmtGap(chatMessages[i - 1].created_at, msg.created_at) : null;
+        const translatedBody = showTranslation ? translatedMessages?.[i]?.body : undefined;
+        const displayBody = translatedBody ?? msg.body;
+        const isTranslated = showTranslation && translatedBody != null && translatedBody !== msg.body;
         return (
           <React.Fragment key={i}>
             {gap && (
@@ -648,6 +703,11 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
                     {time}
                   </span>
                 )}
+                {isTranslated && (
+                  <span className="text-[9px] font-semibold normal-case tracking-normal text-blue-500">
+                    translated
+                  </span>
+                )}
               </span>
               <div
                 className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed break-words whitespace-pre-wrap
@@ -658,7 +718,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
                       : 'bg-white text-slate-800 rounded-tl-sm border border-slate-200 shadow-sm'
                   }`}
               >
-                {msg.body}
+                {displayBody}
               </div>
             </div>
           </React.Fragment>
@@ -818,6 +878,26 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
     </div>
   );
 
+  // Transcript translate toggle
+  const translateAction = (
+    <button
+      onClick={handleToggleTranslation}
+      disabled={isTranslating || chatMessages.length === 0}
+      className={[
+        'text-[11px] font-medium px-2 py-1 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-40',
+        showTranslation
+          ? 'bg-blue-600 text-white hover:bg-blue-700'
+          : 'text-blue-600 hover:text-blue-800 hover:bg-blue-50',
+      ].join(' ')}
+      title={showTranslation ? 'Show original language' : 'Translate transcript to English'}
+    >
+      {isTranslating
+        ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        : null}
+      <span>{isTranslating ? 'Translating…' : showTranslation ? 'English' : 'Translate'}</span>
+    </button>
+  );
+
   // Analysis badge
   const analysisBadge = analysisResult ? (
     <span className="text-[9px] font-bold uppercase bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Done</span>
@@ -901,7 +981,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
           >
             {PANEL_ORDER.filter((id) => shownPanels.has(id)).map((id, i, visible) => {
               const panelProps: Record<PanelId, { title: string; badge?: React.ReactNode; headerAction?: React.ReactNode }> = {
-                transcript:   { title: 'Transcript' },
+                transcript:   { title: 'Transcript', headerAction: translateAction },
                 prompt:       { title: 'Prompt', headerAction: promptPickerAction },
                 analysis:     { title: 'Analysis', badge: analysisBadge },
                 player:       { title: 'Player' },

@@ -111,6 +111,9 @@ export interface Conversation {
   // Transcript & notes
   original_text: string | null;
   raw_messages: RawMessage[] | null;
+  // English translation of raw_messages, aligned by index. Populated on-demand
+  // via /api/conversations/[id]/translate and cached for subsequent views.
+  raw_messages_translated: RawMessage[] | null;
   notes: ConversationNote[];
 }
 

@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
 
         original_text: data.transcript,
         raw_messages: data.raw_messages,
+        raw_messages_translated: null,
         notes: [],
 
         sentiment: null,

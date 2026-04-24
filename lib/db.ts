@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery } from './types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery, RawMessage } from './types';
 import { cestDateToUnixRange } from './intercom';
 import {
   parseAnalysisSummary,
@@ -69,6 +69,7 @@ function mapConversationRow(c: Record<string, any>, notes: ConversationNote[] = 
     account_manager: c.account_manager ?? null,
     original_text: c.original_text ?? null,
     raw_messages: c.raw_messages ?? null,
+    raw_messages_translated: c.raw_messages_translated ?? null,
     last_prompt_id: c.last_prompt_id ?? null,
     last_prompt_content: c.last_prompt_content ?? null,
     notes,
@@ -144,6 +145,7 @@ function conversationRow(c: Conversation) {
 
     original_text: c.original_text,
     raw_messages: c.raw_messages ?? null,
+    raw_messages_translated: c.raw_messages_translated ?? null,
     last_prompt_id: c.last_prompt_id,
     last_prompt_content: c.last_prompt_content,
   };
@@ -213,6 +215,17 @@ export async function dbUpdateConversationByIntercomId(c: Conversation): Promise
     raw_messages: c.raw_messages ?? null,
   }).eq('intercom_id', c.intercom_id);
   if (error) throw new Error(`[db] update conversation by intercom_id: ${error.message}`);
+}
+
+export async function dbUpdateTranslatedMessages(
+  id: string,
+  translated: RawMessage[],
+): Promise<void> {
+  const { error } = await supabase
+    .from('conversations')
+    .update({ raw_messages_translated: translated })
+    .eq('id', id);
+  if (error) throw new Error(`[db] update translated messages (${id}): ${error.message}`);
 }
 
 export async function dbDeleteConversation(id: string): Promise<void> {

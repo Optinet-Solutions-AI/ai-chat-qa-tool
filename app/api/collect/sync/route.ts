@@ -234,6 +234,7 @@ function buildConversation(data: ConversationFetchResult): Conversation {
     count_reopens: data.count_reopens,
     original_text: data.transcript,
     raw_messages: data.raw_messages,
+    raw_messages_translated: null,
     notes: [],
     sentiment: null,
     summary: null,
