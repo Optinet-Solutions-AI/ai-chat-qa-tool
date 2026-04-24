@@ -634,7 +634,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
             {gap && (
               <div className="flex items-center gap-2 my-0.5">
                 <div className="flex-1 h-px bg-slate-200" />
-                <span className="text-[11px] font-semibold text-slate-600 tabular-nums bg-slate-100 rounded-full px-2 py-0.5">
+                <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
                   {gap}
                 </span>
                 <div className="flex-1 h-px bg-slate-200" />
@@ -644,7 +644,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
               <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 px-1 flex items-center gap-1.5">
                 <span>{label}</span>
                 {time && (
-                  <span className="text-[11px] font-semibold normal-case tracking-normal text-slate-700 tabular-nums bg-slate-100 rounded px-1.5 py-0.5">
+                  <span className="text-[11px] font-semibold normal-case tracking-normal text-slate-700 tabular-nums">
                     {time}
                   </span>
                 )}
