@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Conversation } from '@/lib/types';
-import { getSegment, getVipLevel, getAccountManager, getBacklinkFull, parseSummaryForTable } from '@/lib/utils';
+import { getSegment, getVipLevel, getAccountManager, getBacklinkFull, parseSummaryForTable, cleanPlayerName } from '@/lib/utils';
 
 const INTERCOM_APP_ID = process.env.NEXT_PUBLIC_INTERCOM_APP_ID ?? '';
 
@@ -167,9 +167,14 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
                       </span>
                     </td>
                     <td className="px-4 py-3 max-w-[160px]">
-                      <span className="text-xs text-slate-600 truncate block" title={conv.player_name ?? undefined}>
-                        {conv.player_name ?? <span className="text-slate-300">—</span>}
-                      </span>
+                      {(() => {
+                        const name = cleanPlayerName(conv.player_name);
+                        return (
+                          <span className="text-xs text-slate-600 truncate block" title={name ?? undefined}>
+                            {name ?? <span className="text-slate-300">—</span>}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
                       {conv.agent_name ?? '—'}

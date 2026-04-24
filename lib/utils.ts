@@ -140,6 +140,22 @@ export function getAccountManager(conv: Conversation): string | null {
   return conv.account_manager ?? null;
 }
 
+// Intercom auto-appends a casino slug to contact names (e.g. "Jan Steffens _spinjo",
+// "Matthias Lipp rooster"). Strip that artefact so only first + last name remain.
+const CASINO_SLUG_RE = /^(rocketspin|roosterbet|rooster|playmojo|lucky7even|lucky7|luckyvibe|lucky-vibe|spinjo|spinsup|fortuneplay|fortune-play|rollero)$/i;
+
+export function cleanPlayerName(name: string | null): string | null {
+  if (!name) return null;
+  let s = name.trim();
+  s = s.replace(/\s+_[A-Za-z0-9-]+$/, '').trim();
+  const parts = s.split(/\s+/);
+  if (parts.length > 1 && CASINO_SLUG_RE.test(parts[parts.length - 1])) {
+    parts.pop();
+    s = parts.join(' ');
+  }
+  return s.trim() || null;
+}
+
 export function getBacklinkFull(conv: Conversation): string | null {
   return getCustomAttr(
     conv.player_custom_attributes,
