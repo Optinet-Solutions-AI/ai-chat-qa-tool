@@ -1,7 +1,6 @@
 import { supabase } from './supabase';
 import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery } from './types';
 import { cestDateToUnixRange } from './intercom';
-import { getAmGroupsForFilter } from './utils';
 
 // ── Shared row mapper ──────────────────────────────────────────────────────
 
@@ -498,11 +497,13 @@ function buildJsonFilterBaseQuery(fields: string, filters: ConversationFilters):
     else                                                q = q.eq('agent_name', filters.agent_name);
   }
   if (filters.account_manager) {
-    const groups = getAmGroupsForFilter(filters.account_manager);
-    if (groups.length > 0) {
-      const groupSet = `{${groups.join(',')}}`;
-      q = q.or(`player_tags.ov.${groupSet},player_segments.ov.${groupSet},tags.ov.${groupSet}`);
-    }
+    const am = filters.account_manager;
+    const lower = am.toLowerCase();
+    const amTags = lower === 'softswiss'
+      ? ['group: softswiss🎲', 'group: softswiss dach', 'group: softswiss english', 'group: softswiss']
+      : [`group: vip_${lower}🎲`, `group: non-vip_${lower}🎲`];
+    const quotedTags = amTags.map((t) => `"${t}"`).join(',');
+    q = q.or(`account_manager.eq.${am},player_tags.ov.{${quotedTags}}`);
   }
   if (filters.dateFrom)              q = q.gte('intercom_created_at', new Date(filters.dateFrom).toISOString());
   if (filters.dateTo) {
@@ -601,14 +602,17 @@ export async function loadConversationsWithJsonFilter(
   }
 
   if (filters.issue_item) {
-    // Strip leading "N. " so "Account Closure Requests" matches "1. Account Closure Requests"
-    const v = filters.issue_item.replace(/^\d+\.\s*/, '').trim().toLowerCase();
+    // Strip leading "N. " so "Account Closure Requests" matches "1. Account Closure Requests".
+    // A trailing 's' is also stripped so singular/plural variants
+    // ("Account Closure Request" vs "Account Closure Requests") are treated as the same issue.
+    const normalize = (s: string) => s.replace(/^\d+\.\s*/, '').trim().toLowerCase().replace(/s$/, '');
+    const v = normalize(filters.issue_item);
     filtered = filtered.filter((r) => {
       const json = parseSummary(r.summary);
       const results = Array.isArray(json?.results) ? json.results : [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return results.some((x: any) => {
-        const raw = (x.item as string | null)?.replace(/^\d+\.\s*/, '').trim().toLowerCase();
+        const raw = (x.item as string | null) ? normalize(x.item as string) : '';
         return raw === v;
       });
     });

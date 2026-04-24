@@ -184,24 +184,31 @@ export async function GET(req: NextRequest) {
     // ── Collect issue options grouped by canonical category ───────────────────
     // Strip leading "N. " from item labels so "1. Account Closure Requests" and
     // "Account Closure Requests" deduplicate to the same entry.  The numeric
-    // order is preserved for sorting within each group.
+    // order is preserved for sorting within each group.  A trailing 's' is also
+    // stripped for the dedup key so singular/plural variants
+    // ("Account Closure Request" vs "Account Closure Requests") collapse into
+    // one entry; the most frequent variant wins as the display label.
     const stripItemNum = (s: string) => s.replace(/^\d+\.\s*/, '').trim();
     const itemNumOrder = (s: string) => { const m = s.match(/^(\d+)\./); return m ? parseInt(m[1], 10) : 999; };
+    const normalizeIssueKey = (s: string) => s.toLowerCase().replace(/s$/, '');
 
     const minIssueCount = Math.max(2, Math.ceil(rows.length * 0.001));
-    const allIssueFreq: Record<string, { label: string; catPrefix: number; order: number; count: number }> = {};
+    const allIssueFreq: Record<string, { label: string; catPrefix: number; order: number; count: number; labelCounts: Record<string, number> }> = {};
     for (const { item, category } of parsed.flatMap((p) => p.items)) {
       if (item === 'Unknown') continue;
       const clean = stripItemNum(item);
       if (!clean) continue;
-      const key = clean.toLowerCase();
+      const key = normalizeIssueKey(clean);
       const ord = itemNumOrder(item);
       if (!allIssueFreq[key]) {
-        allIssueFreq[key] = { label: clean, catPrefix: numPrefix(category), order: ord, count: 0 };
+        allIssueFreq[key] = { label: clean, catPrefix: numPrefix(category), order: ord, count: 0, labelCounts: {} };
       } else if (ord < allIssueFreq[key].order) {
         allIssueFreq[key].order = ord; // keep lowest numeric position seen
       }
       allIssueFreq[key].count++;
+      allIssueFreq[key].labelCounts[clean] = (allIssueFreq[key].labelCounts[clean] ?? 0) + 1;
+      const [topLabel] = Object.entries(allIssueFreq[key].labelCounts).sort((a, b) => b[1] - a[1])[0];
+      allIssueFreq[key].label = topLabel;
     }
     const qualifiedIssues = Object.values(allIssueFreq).filter(({ count }) => count >= minIssueCount);
     const groupedIssues = canonicalCategories
@@ -227,8 +234,8 @@ export async function GET(req: NextRequest) {
     };
 
     // ── Filter by issue item (strip "N. " prefix before comparing) ────────────
-    const issueKeys = issues.map((i) => stripItemNum(i).toLowerCase());
-    const matchesIssue = (item: string) => issueKeys.includes(stripItemNum(item).toLowerCase());
+    const issueKeys = issues.map((i) => normalizeIssueKey(stripItemNum(i)));
+    const matchesIssue = (item: string) => issueKeys.includes(normalizeIssueKey(stripItemNum(item)));
 
     let filteredRows   = categoryKeys.length > 0 ? rows.filter((_, i) => parsed[i].categories.some((c) => matchesCategory(c))) : rows;
     let filteredParsed = categoryKeys.length > 0 ? parsed.filter((p)  => p.categories.some((c) => matchesCategory(c))) : parsed;
