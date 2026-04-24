@@ -697,7 +697,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
             )}
             <div className={`flex flex-col gap-1 ${isAgent ? 'items-end' : 'items-start'}`}>
               <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 px-1 flex items-center gap-1.5">
-                <span>{label}</span>
+                <span>{label}{isAgent && conv.agent_name ? ` · ${conv.agent_name}` : ''}</span>
                 {time && (
                   <span className="text-[11px] font-semibold normal-case tracking-normal text-slate-700 tabular-nums">
                     {time}
