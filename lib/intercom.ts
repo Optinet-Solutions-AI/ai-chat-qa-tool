@@ -14,6 +14,7 @@ interface IntercomPart {
   part_type: string;
   body: string;
   author: IntercomAuthor;
+  created_at?: number;
 }
 
 export interface IntercomConversation {
@@ -229,6 +230,7 @@ export async function fetchIntercomData(
   const rawMessages: RawMessage[] = commentParts.map((p) => ({
     author_type: p.author.type ?? 'user',
     body: stripHtml(p.body),
+    created_at: tsToIso(p.created_at),
   }));
   const transcript = commentParts
     .map((p) => {

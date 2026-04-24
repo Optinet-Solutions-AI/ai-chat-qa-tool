@@ -9,6 +9,7 @@ export interface ConversationNote {
 export interface RawMessage {
   author_type: string;
   body: string;
+  created_at?: string | null;
 }
 
 export interface PlayerCompany {

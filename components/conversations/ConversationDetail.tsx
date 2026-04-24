@@ -547,7 +547,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
   );
 
   // Build structured messages from raw_messages, falling back to parsing original_text
-  const chatMessages: { author_type: string; body: string }[] = (() => {
+  const chatMessages: { author_type: string; body: string; created_at?: string | null }[] = (() => {
     if (conv.raw_messages && conv.raw_messages.length > 0) return conv.raw_messages;
     if (!conv.original_text) return [];
     return conv.original_text.split('\n\n').flatMap((line) => {
@@ -560,6 +560,29 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
     });
   })();
 
+  const fmtMsgTime = (iso?: string | null) => {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      const s = String(d.getSeconds()).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    } catch { return null; }
+  };
+
+  const fmtGap = (prev?: string | null, cur?: string | null) => {
+    if (!prev || !cur) return null;
+    const diffMs = new Date(cur).getTime() - new Date(prev).getTime();
+    if (!Number.isFinite(diffMs) || diffMs < 1000) return null;
+    const secs = Math.round(diffMs / 1000);
+    if (secs < 60) return `+${secs}s`;
+    if (secs < 3600) return `+${Math.floor(secs / 60)}m ${secs % 60}s`;
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `+${h}h ${m}m`;
+  };
+
   const transcriptContent = (
     <div className="flex flex-col gap-3 py-1">
       {chatMessages.length === 0 && (
@@ -569,23 +592,39 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
         const isAgent = msg.author_type === 'admin';
         const isBot   = msg.author_type === 'bot' || msg.author_type === 'operator';
         const label   = isAgent ? 'Agent' : isBot ? 'Bot' : 'Player';
+        const time    = fmtMsgTime(msg.created_at);
+        const gap     = i > 0 ? fmtGap(chatMessages[i - 1].created_at, msg.created_at) : null;
         return (
-          <div key={i} className={`flex flex-col gap-1 ${isAgent ? 'items-end' : 'items-start'}`}>
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 px-1">
-              {label}
-            </span>
-            <div
-              className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed break-words whitespace-pre-wrap
-                ${isAgent
-                  ? 'bg-[#1b3a5c] text-white rounded-tr-sm'
-                  : isBot
-                    ? 'bg-slate-100 text-slate-600 rounded-tl-sm border border-slate-200'
-                    : 'bg-white text-slate-800 rounded-tl-sm border border-slate-200 shadow-sm'
-                }`}
-            >
-              {msg.body}
+          <React.Fragment key={i}>
+            {gap && (
+              <div className="flex items-center gap-2 my-0.5">
+                <div className="flex-1 h-px bg-slate-100" />
+                <span className="text-[10px] font-medium text-slate-400 tabular-nums">{gap}</span>
+                <div className="flex-1 h-px bg-slate-100" />
+              </div>
+            )}
+            <div className={`flex flex-col gap-1 ${isAgent ? 'items-end' : 'items-start'}`}>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 px-1 flex items-center gap-1.5">
+                <span>{label}</span>
+                {time && (
+                  <span className="font-normal normal-case tracking-normal text-slate-300 tabular-nums">
+                    {time}
+                  </span>
+                )}
+              </span>
+              <div
+                className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed break-words whitespace-pre-wrap
+                  ${isAgent
+                    ? 'bg-[#1b3a5c] text-white rounded-tr-sm'
+                    : isBot
+                      ? 'bg-slate-100 text-slate-600 rounded-tl-sm border border-slate-200'
+                      : 'bg-white text-slate-800 rounded-tl-sm border border-slate-200 shadow-sm'
+                  }`}
+              >
+                {msg.body}
+              </div>
             </div>
-          </div>
+          </React.Fragment>
         );
       })}
     </div>
