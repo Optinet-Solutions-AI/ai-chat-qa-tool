@@ -818,9 +818,9 @@ export default function DashboardPage() {
               {data.agentBreakdown.length === 0 ? (
                 <Empty message="No agent data available" />
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[520px]">
                   <table className="w-full text-sm">
-                    <thead>
+                    <thead className="sticky top-0 bg-white">
                       <tr className="border-b border-slate-100">
                         <th className="text-left py-2 pr-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Agent</th>
                         <th className="text-right py-2 text-xs font-semibold text-slate-400 uppercase tracking-wide">Conversations</th>

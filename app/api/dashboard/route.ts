@@ -308,7 +308,7 @@ export async function GET(req: NextRequest) {
     const agentBreakdown = countBy(
       filteredRows,
       (r) => (r.agent_name as string | null)
-    ).slice(0, 15);
+    );
 
     // ── Conversations by date ────────────────────────────────────────────────
     // When a category filter is active we can't use the DB RPC (it has no category
