@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
   const categories     = searchParams.getAll('category');
   const issues         = searchParams.getAll('issue');
   const severity       = searchParams.get('severity');
+  const language       = searchParams.get('language');
 
   try {
     // Shared DB-level filter — the exact same helper is used by the drill-down
@@ -247,6 +248,17 @@ export async function GET(req: NextRequest) {
       filteredParsed = filteredParsed.filter((_, i) => keep[i]);
     }
 
+    const hasLanguageFilter = !!language;
+    if (hasLanguageFilter) {
+      const target = language!.toLowerCase();
+      const keep = filteredParsed.map((p) => {
+        const lang = p.language?.trim().toLowerCase();
+        return target === 'unknown' ? !lang : lang === target;
+      });
+      filteredRows   = filteredRows.filter((_, i) => keep[i]);
+      filteredParsed = filteredParsed.filter((_, i) => keep[i]);
+    }
+
     // ── Resolution breakdown ─────────────────────────────────────────────
     const resolutionBreakdown = countBy(filteredParsed, (p) => p.resolution_status);
 
@@ -324,7 +336,7 @@ export async function GET(req: NextRequest) {
     // When a category filter is active we can't use the DB RPC (it has no category
     // param), so we group the already-filtered in-memory rows by CEST date instead.
     let conversationsByDate: { date: string; count: number }[];
-    if (hasCategoryFilter || hasIssueFilter || hasSeverityFilter) {
+    if (hasCategoryFilter || hasIssueFilter || hasSeverityFilter || hasLanguageFilter) {
       const dateCounts: Record<string, number> = {};
       for (const r of filteredRows) {
         const iso = r.intercom_created_at as string | null;
@@ -390,10 +402,24 @@ export async function GET(req: NextRequest) {
     const uniqueBrands = [...new Set((allBrands ?? []).map((r) => r.brand))].filter((b) => b?.toLowerCase() !== 'rooster partners').sort();
     const uniqueAgents = [...new Set((allAgents ?? []).map((r) => r.agent_name))].sort();
 
+    // Language options are derived from the DB-filtered analyzed rows (same
+    // scope the category/issue options use), so the dropdown reflects languages
+    // that actually exist within the current brand/agent/date selection.
+    const languageFreq: Record<string, number> = {};
+    for (const p of parsed) {
+      const lang = p.language?.trim();
+      if (!lang) continue;
+      const key = lang.toUpperCase();
+      languageFreq[key] = (languageFreq[key] ?? 0) + 1;
+    }
+    const uniqueLanguages = Object.entries(languageFreq)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label]) => label);
+
     // When a category filter is active, the DB-level counts are global (the RPC
     // has no category param).  Use the in-memory filtered counts instead so the
     // stat cards reflect what the charts show.
-    const hasInMemoryFilter = hasCategoryFilter || hasIssueFilter || hasSeverityFilter;
+    const hasInMemoryFilter = hasCategoryFilter || hasIssueFilter || hasSeverityFilter || hasLanguageFilter;
     const overviewAnalyzed  = hasInMemoryFilter ? filteredRows.length  : analyzed;
     const overviewAlertWorthy = hasInMemoryFilter
       ? filteredRows.filter((r) => r.is_alert_worthy).length
@@ -422,6 +448,7 @@ export async function GET(req: NextRequest) {
       filterOptions: {
         brands: uniqueBrands,
         agents: uniqueAgents,
+        languages: uniqueLanguages,
         categories: allCategoryLabels,
         issues: groupedIssues,
       },

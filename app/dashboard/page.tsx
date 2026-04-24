@@ -32,7 +32,7 @@ interface DashboardData {
   brandBreakdown: LabelCount[];
   agentBreakdown: LabelCount[];
   conversationsByDate: DateCount[];
-  filterOptions: { brands: string[]; agents: string[]; categories: string[]; issues: { category: string; items: string[] }[] };
+  filterOptions: { brands: string[]; agents: string[]; languages: string[]; categories: string[]; issues: { category: string; items: string[] }[] };
 }
 
 // ── Cache helpers ──────────────────────────────────────────────────────────
@@ -279,6 +279,7 @@ export default function DashboardPage() {
   const [brand, setBrand]                     = useState('');
   const [agent, setAgent]                     = useState('');
   const [accountManager, setAccountManager]   = useState('');
+  const [language, setLanguage]               = useState('');
   const [categories, setCategories]           = useState<string[]>([]);
   const [issues, setIssues]                   = useState<string[]>([]);
   const [severity, setSeverity]               = useState('');
@@ -290,6 +291,7 @@ export default function DashboardPage() {
     if (brand)           filters.brand           = brand;
     if (agent)           filters.agent_name      = agent;
     if (accountManager)  filters.account_manager = accountManager;
+    if (language)        filters.language        = language;
     if (categories.length === 1) filters.issue_category = categories[0];
     if (issues.length === 1)     filters.issue_item     = issues[0];
     if (severity)        filters.dissatisfaction_severity = `Level ${severity}`;
@@ -310,7 +312,7 @@ export default function DashboardPage() {
     setOverlayTitle(title);
     setOverlayFilters(filters);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, brand, agent, accountManager, categories, issues, severity]);
+  }, [dateFrom, dateTo, brand, agent, accountManager, language, categories, issues, severity]);
 
   const forceRef = useRef(false);
 
@@ -321,6 +323,7 @@ export default function DashboardPage() {
     if (brand)          params.set('brand',          brand);
     if (agent)          params.set('agent',          agent);
     if (accountManager) params.set('accountManager', accountManager);
+    if (language)       params.set('language',       language);
     categories.forEach((c) => params.append('category', c));
     issues.forEach((i) => params.append('issue', i));
     if (severity)       params.set('severity',       severity);
@@ -351,12 +354,13 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, brand, agent, accountManager, categories, issues, severity]);
+  }, [dateFrom, dateTo, brand, agent, accountManager, language, categories, issues, severity]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const brandOptions    = data?.filterOptions.brands     ?? [];
   const agentOptions    = data?.filterOptions.agents     ?? [];
+  const languageOptions = data?.filterOptions.languages  ?? [];
   const categoryOptions = data?.filterOptions.categories ?? [];
   const issueGroups     = data?.filterOptions.issues     ?? [];
 
@@ -452,6 +456,17 @@ export default function DashboardPage() {
           </select>
         </div>
         <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Language</label>
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All languages</option>
+            {languageOptions.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Severity</label>
           <select
             value={severity}
@@ -489,9 +504,9 @@ export default function DashboardPage() {
             disabled={categories.length === 0}
           />
         </div>
-        {(dateFrom || dateTo || brand || agent || accountManager || severity || categories.length > 0 || issues.length > 0) && (
+        {(dateFrom || dateTo || brand || agent || accountManager || language || severity || categories.length > 0 || issues.length > 0) && (
           <button
-            onClick={() => { setDateFrom(''); setDateTo(''); setBrand(''); setAgent(''); setAccountManager(''); setSeverity(''); setCategories([]); setIssues([]); localStorage.removeItem('dashboard-dateFrom'); localStorage.removeItem('dashboard-dateTo'); }}
+            onClick={() => { setDateFrom(''); setDateTo(''); setBrand(''); setAgent(''); setAccountManager(''); setLanguage(''); setSeverity(''); setCategories([]); setIssues([]); localStorage.removeItem('dashboard-dateFrom'); localStorage.removeItem('dashboard-dateTo'); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline pb-1.5"
           >
             Clear filters
