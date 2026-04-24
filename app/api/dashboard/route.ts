@@ -66,11 +66,17 @@ export async function GET(req: NextRequest) {
     let from = 0;
 
     while (true) {
+      // Same explicit order the drill-down uses — without ORDER BY, Postgres
+      // offset pagination across separate HTTP requests can skip or duplicate
+      // rows, which was a plausible source of past dashboard/drill-down count
+      // drift.
       const { data: page } = await applyFilters(
         supabase
           .from('conversations')
-          .select('summary, brand, agent_name, is_alert_worthy, intercom_created_at, language, resolution_status, dissatisfaction_severity')
+          .select('id, summary, brand, agent_name, is_alert_worthy, intercom_created_at, language, resolution_status, dissatisfaction_severity')
           .not('summary', 'is', null)
+          .order('intercom_created_at', { ascending: false })
+          .order('id', { ascending: false })
           .range(from, from + PAGE_SIZE - 1)
       ) as { data: Array<Record<string, unknown>> | null };
 
@@ -80,7 +86,17 @@ export async function GET(req: NextRequest) {
       from += PAGE_SIZE;
     }
 
-    const rows = allAnalyzedRows;
+    // Defensive dedup: even with a stable ORDER BY, any future change that
+    // alters the query between pages (or a Supabase quirk) could hand back the
+    // same row twice. Keying by id guarantees each conversation is counted
+    // exactly once.
+    const seenIds = new Set<string>();
+    const rows = allAnalyzedRows.filter((r) => {
+      const id = r.id as string | undefined;
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
 
     // ── Parse summary JSON for fields not stored individually ────────────
     type Parsed = {

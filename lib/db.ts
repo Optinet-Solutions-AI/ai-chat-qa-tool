@@ -463,7 +463,11 @@ function buildJsonFilterBaseQuery(fields: string, filters: ConversationFilters):
     .from('conversations')
     .select(fields)
     .not('summary', 'is', null)
-    .order('intercom_created_at', { ascending: false });
+    // Secondary id sort makes pagination deterministic — without a tiebreaker,
+    // rows with identical intercom_created_at can be split across pages in
+    // unstable order, silently dropping or duplicating rows.
+    .order('intercom_created_at', { ascending: false })
+    .order('id', { ascending: false });
 
   q = applyConversationDbFilters(q, {
     dateFrom:       filters.dateFrom,
@@ -489,17 +493,21 @@ export async function loadConversationsWithJsonFilter(
 
   // ── Step 1: fetch only id + summary (lightweight) ──────────────────────
   type Slim = { id: string; summary: string | null };
-  const allSlim: Slim[] = [];
+  const slimById = new Map<string, Slim>();
   let offset = 0;
   while (true) {
     const { data, error } = await buildJsonFilterBaseQuery('id, summary', filters)
       .range(offset, offset + DB_PAGE - 1);
     if (error) throw new Error(`[db] loadConversationsWithJsonFilter (slim): ${error.message}`);
     if (!data || data.length === 0) break;
-    allSlim.push(...(data as Slim[]));
+    // Defensive dedup by id — mirrors the dashboard route so both paths cannot
+    // diverge on pagination quirks that occasionally hand back the same row
+    // across adjacent pages.
+    for (const r of data as Slim[]) slimById.set(r.id, r);
     if (data.length < DB_PAGE) break;
     offset += DB_PAGE;
   }
+  const allSlim: Slim[] = [...slimById.values()];
 
   // ── Step 2: apply JSON filters in memory ────────────────────────────────
   // Parse each summary once so every sub-filter reuses the same parsed shape.
