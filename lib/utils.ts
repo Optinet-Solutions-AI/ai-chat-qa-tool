@@ -106,7 +106,6 @@ export function getAmGroupsForFilter(am: string): string[] {
 }
 
 export function getSegment(conv: Conversation): 'VIP' | 'NON-VIP' | 'SoftSwiss' | null {
-  // SoftSwiss group membership takes priority over any custom attribute
   const companyNames = (conv.player_companies ?? []).map((c) => c.name);
   const allGroups = [
     ...(conv.player_tags ?? []),
@@ -114,8 +113,13 @@ export function getSegment(conv: Conversation): 'VIP' | 'NON-VIP' | 'SoftSwiss' 
     ...(conv.tags ?? []),
     ...companyNames,
   ];
-  if (allGroups.some((g) => { const n = normalizeGroupName(g); return n === 'softswiss' || n.startsWith('softswiss '); })) return 'SoftSwiss';
-  // Then check custom attributes and explicit segment values
+  const normalizedGroups = allGroups.map(normalizeGroupName);
+  // An explicit VIP_<am> / NON-VIP_<am> AM assignment beats SoftSwiss platform
+  // group membership: a player on a SoftSwiss-platform brand can still be
+  // personally managed by an AM (e.g. RocketSpin player tagged vip_koko).
+  if (normalizedGroups.some((g) => /^vip_/.test(g))) return 'VIP';
+  if (normalizedGroups.some((g) => /^non-vip_/.test(g))) return 'NON-VIP';
+  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return 'SoftSwiss';
   const seg = getCustomAttr(conv.player_custom_attributes, 'Segment', 'segment', 'vip_segment', 'VIP Segment', 'Player Segment');
   if (seg) {
     const s = seg.toUpperCase().replace(/[\s-]/g, '');
@@ -125,8 +129,6 @@ export function getSegment(conv: Conversation): 'VIP' | 'NON-VIP' | 'SoftSwiss' 
   const segs = conv.player_segments ?? [];
   if (segs.some((s) => /^vip$/i.test(s.trim()))) return 'VIP';
   if (segs.some((s) => /non.?vip/i.test(s))) return 'NON-VIP';
-  if (allGroups.some((g) => /^vip_/.test(normalizeGroupName(g)))) return 'VIP';
-  if (allGroups.some((g) => /^non-vip_/.test(normalizeGroupName(g)))) return 'NON-VIP';
   return null;
 }
 
@@ -196,11 +198,14 @@ export function getAccountManager(conv: Conversation): string | null {
     ...companyNames,
   ];
   const normalizedGroups = allGroups.map(normalizeGroupName);
-  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
+  // An explicit VIP_<am> / NON-VIP_<am> AM assignment beats SoftSwiss platform
+  // group membership: a player on a SoftSwiss-platform brand can still be
+  // personally managed by an AM (e.g. RocketSpin player tagged vip_koko).
   for (const [group, am] of Object.entries(GROUP_TO_AM)) {
     if (group === 'softswiss') continue;
     if (normalizedGroups.includes(group)) return am;
   }
+  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
   // Fall back to stored value (custom attribute or pre-migration cached name)
   const fromAttrs = getCustomAttr(
     conv.player_custom_attributes,
