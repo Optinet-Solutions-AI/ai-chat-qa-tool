@@ -274,14 +274,14 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
   }, [conversation.id]);
 
   // Auto-refetch raw_messages from Intercom if stored messages lack timestamps.
-  // Older rows were collected before message timestamps were captured; this
-  // silently backfills them so response-time deltas render on the transcript.
+  // Older rows were collected before message timestamps were captured (or stored
+  // only original_text with no raw_messages); this silently backfills them so
+  // response-time deltas render on the transcript.
   useEffect(() => {
     setRefreshedMessages(null);
     if (!conv.intercom_id) return;
     const msgs = conv.raw_messages ?? [];
-    if (msgs.length === 0) return;
-    if (msgs.some((m) => m.created_at)) return;
+    if (msgs.length > 0 && msgs.some((m) => m.created_at)) return;
 
     let cancelled = false;
     (async () => {
