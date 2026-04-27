@@ -18,7 +18,11 @@ import { generateId } from '@/lib/utils';
 export const maxDuration = 300;
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const MAX_REQUESTS_PER_CHUNK = 2_500;
+// 500 keeps us safely under OpenAI's 2M enqueued-token cap on gpt-4o-mini
+// (Tier 1). Enqueued tokens = input_tokens + max_tokens per request; with
+// input ~1.5–2k and max_tokens 2048, that's ~3.5–4k/request → 500 ≈ 1.75–2M.
+// 2,500 was too aggressive once post-backfill transcripts grew.
+const MAX_REQUESTS_PER_CHUNK = 500;
 const MAX_FILE_BYTES = 90 * 1024 * 1024;
 // Only submit 1 batch per cron run to stay under the enqueued-token org limit.
 // The cron runs every 2 hours, so the next run picks up where this one left off.
