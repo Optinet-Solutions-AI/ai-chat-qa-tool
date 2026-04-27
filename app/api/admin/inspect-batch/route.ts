@@ -19,9 +19,46 @@ export async function GET(req: NextRequest) {
   if (!apiKey) return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
 
   const id = req.nextUrl.searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'id query param required' }, { status: 400 });
-
   const headers = { Authorization: `Bearer ${apiKey}` };
+
+  // ?list=1 → enumerate every batch OpenAI knows about for this org so we can
+  // find rogue in_progress batches that are eating the 2M-token quota even
+  // though our DB thinks nothing is active.
+  if (req.nextUrl.searchParams.get('list')) {
+    const all: Array<Record<string, unknown>> = [];
+    let after: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const url = new URL('https://api.openai.com/v1/batches');
+      url.searchParams.set('limit', '100');
+      if (after) url.searchParams.set('after', after);
+      const res = await fetch(url.toString(), { headers });
+      if (!res.ok) return NextResponse.json({ error: `OpenAI ${res.status}: ${await res.text()}` }, { status: 500 });
+      const page = await res.json();
+      all.push(...(page.data ?? []));
+      if (!page.has_more || (page.data ?? []).length === 0) break;
+      after = page.last_id ?? null;
+      if (!after) break;
+    }
+    const summary: Record<string, number> = {};
+    for (const b of all) {
+      const s = String(b.status ?? 'unknown');
+      summary[s] = (summary[s] ?? 0) + 1;
+    }
+    const active = all.filter((b) => ['validating', 'in_progress', 'finalizing'].includes(String(b.status)));
+    return NextResponse.json({
+      total: all.length,
+      summary,
+      active: active.map((b) => ({
+        id: b.id,
+        status: b.status,
+        created_at: b.created_at,
+        request_counts: b.request_counts,
+        endpoint: b.endpoint,
+      })),
+    });
+  }
+
+  if (!id) return NextResponse.json({ error: 'id or list=1 query param required' }, { status: 400 });
 
   const batchRes = await fetch(`https://api.openai.com/v1/batches/${id}`, { headers });
   if (!batchRes.ok) {
