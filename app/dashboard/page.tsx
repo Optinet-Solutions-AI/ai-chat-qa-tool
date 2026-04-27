@@ -109,13 +109,20 @@ function shortDate(iso: string) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// Ctrl/Cmd-click or middle-click → open in new tab instead of overlay
+function isNewTabClick(e?: { ctrlKey?: boolean; metaKey?: boolean; button?: number }): boolean {
+  if (!e) return false;
+  return Boolean(e.ctrlKey) || Boolean(e.metaKey) || e.button === 1;
+}
+
 // ── Stat card ──────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, sub, color, onClick }: { label: string; value: string | number; sub?: string; color?: string; onClick?: () => void }) {
+function StatCard({ label, value, sub, color, onClick }: { label: string; value: string | number; sub?: string; color?: string; onClick?: (e: React.MouseEvent) => void }) {
   return (
     <div
       className={`bg-white rounded-2xl border border-slate-200 p-5 transition-colors ${onClick ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/30' : ''}`}
       onClick={onClick}
+      onMouseDown={onClick ? (e) => { if (e.button === 1) { e.preventDefault(); onClick(e); } } : undefined}
     >
       <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">{label}</p>
       <p className={`text-3xl font-bold mt-1 ${color ?? 'text-slate-800'}`}>{typeof value === 'number' ? fmt(value) : value}</p>
@@ -284,7 +291,7 @@ export default function DashboardPage() {
   const [issues, setIssues]                   = useState<string[]>([]);
   const [severity, setSeverity]               = useState('');
 
-  const navToConversations = useCallback((extra: Record<string, string>) => {
+  const navToConversations = useCallback((extra: Record<string, string>, e?: React.MouseEvent | MouseEvent) => {
     const filters: Record<string, string> = {};
     if (dateFrom)        filters.dateFrom        = dateFrom;
     if (dateTo)          filters.dateTo          = dateTo;
@@ -309,10 +316,32 @@ export default function DashboardPage() {
       else title = `${label}: ${val}`;
     }
 
+    if (isNewTabClick(e)) {
+      const params = new URLSearchParams();
+      params.set('ov_filters', JSON.stringify(filters));
+      params.set('ov_title', title);
+      window.open(`${window.location.pathname}?${params.toString()}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
     setOverlayTitle(title);
     setOverlayFilters(filters);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFrom, dateTo, brand, agent, accountManager, language, categories, issues, severity]);
+
+  // Restore overlay state from URL (used when a new tab is opened via Ctrl/middle-click)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams(window.location.search);
+    const f = sp.get('ov_filters');
+    const t = sp.get('ov_title');
+    if (f && t) {
+      try {
+        setOverlayFilters(JSON.parse(f));
+        setOverlayTitle(t);
+      } catch { /* ignore malformed params */ }
+    }
+  }, []);
 
   const forceRef = useRef(false);
 
@@ -532,27 +561,27 @@ export default function DashboardPage() {
             <StatCard
               label="Total Conversations"
               value={data.overview.total}
-              onClick={() => navToConversations({})}
+              onClick={(e) => navToConversations({}, e)}
             />
             <StatCard
               label="Analyzed"
               value={data.overview.analyzed}
               sub={`${data.overview.analyzedPct}% of total`}
               color="text-blue-600"
-              onClick={() => navToConversations({ analyzed: 'true' })}
+              onClick={(e) => navToConversations({ analyzed: 'true' }, e)}
             />
             <StatCard
               label="Unanalyzed"
               value={data.overview.unanalyzed}
               color="text-amber-500"
-              onClick={() => navToConversations({ analyzed: 'false' })}
+              onClick={(e) => navToConversations({ analyzed: 'false' }, e)}
             />
             <StatCard
               label="Alert-worthy"
               value={data.overview.alertWorthy}
               sub="Needs immediate action"
               color="text-red-500"
-              onClick={() => navToConversations({ alert_worthy: 'true' })}
+              onClick={(e) => navToConversations({ alert_worthy: 'true' }, e)}
             />
           </div>
 
@@ -569,6 +598,11 @@ export default function DashboardPage() {
                     <LineChart
                       data={data.conversationsByDate}
                       margin={{ top: 4, right: 8, left: -20, bottom: 40 }}
+                      style={{ cursor: 'pointer' }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onClick={(d: any, e: any) => { if (d?.activeLabel) navToConversations({ dateFrom: d.activeLabel, dateTo: d.activeLabel }, e); }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onMouseDown={(d: any, e: any) => { if (e?.button === 1 && d?.activeLabel) { e.preventDefault?.(); navToConversations({ dateFrom: d.activeLabel, dateTo: d.activeLabel }, e); } }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: '#94a3b8' }} interval={0} angle={-45} textAnchor="end" />
@@ -581,15 +615,7 @@ export default function DashboardPage() {
                         strokeWidth={2}
                         dot={false}
                         name="Conversations"
-                        activeDot={{
-                          r: 6,
-                          cursor: 'pointer',
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          onClick: (_: any, payload: any) => {
-                            const date = payload?.payload?.date;
-                            if (date) navToConversations({ dateFrom: date, dateTo: date });
-                          },
-                        }}
+                        activeDot={{ r: 6, cursor: 'pointer' }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -614,7 +640,9 @@ export default function DashboardPage() {
                         innerRadius={45}
                         outerRadius={70}
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        onClick={(d: any) => { if (d?.label) navToConversations({ resolution_status: d.label }); }}
+                        onClick={(d: any, _i: number, e: any) => { if (d?.label) navToConversations({ resolution_status: d.label }, e); }}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        onMouseDown={(d: any, _i: number, e: any) => { if (e?.button === 1 && d?.label) { e.preventDefault?.(); navToConversations({ resolution_status: d.label }, e); } }}
                       >
                         {data.resolutionBreakdown.map((entry, i) => (
                           <Cell key={i} fill={RESOLUTION_COLORS[entry.label] ?? COLORS[i % COLORS.length]} />
@@ -628,7 +656,8 @@ export default function DashboardPage() {
                       <div
                         key={i}
                         className="flex items-center justify-between text-xs cursor-pointer hover:bg-slate-50 rounded px-1 -mx-1 transition-colors"
-                        onClick={() => navToConversations({ resolution_status: r.label })}
+                        onClick={(e) => navToConversations({ resolution_status: r.label }, e)}
+                        onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); navToConversations({ resolution_status: r.label }, e); } }}
                       >
                         <div className="flex items-center gap-1.5">
                           <div className="w-2.5 h-2.5 rounded-full" style={{ background: RESOLUTION_COLORS[r.label] ?? COLORS[i % COLORS.length] }} />
@@ -659,7 +688,9 @@ export default function DashboardPage() {
                       margin={{ top: 0, right: 16, left: 8, bottom: 0 }}
                       style={{ cursor: 'pointer' }}
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      onClick={(data: any) => { if (data?.activeLabel) navToConversations({ issue_category: data.activeLabel }); }}
+                      onClick={(data: any, e: any) => { if (data?.activeLabel) navToConversations({ issue_category: data.activeLabel }, e); }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onMouseDown={(data: any, e: any) => { if (e?.button === 1 && data?.activeLabel) { e.preventDefault?.(); navToConversations({ issue_category: data.activeLabel }, e); } }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -689,7 +720,9 @@ export default function DashboardPage() {
                       margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
                       style={{ cursor: 'pointer' }}
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      onClick={(data: any) => { if (data?.activeLabel) navToConversations({ dissatisfaction_severity: data.activeLabel }); }}
+                      onClick={(data: any, e: any) => { if (data?.activeLabel) navToConversations({ dissatisfaction_severity: data.activeLabel }, e); }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onMouseDown={(data: any, e: any) => { if (e?.button === 1 && data?.activeLabel) { e.preventDefault?.(); navToConversations({ dissatisfaction_severity: data.activeLabel }, e); } }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -711,7 +744,8 @@ export default function DashboardPage() {
                       <div
                         key={i}
                         className="flex items-center justify-between text-xs cursor-pointer hover:bg-slate-50 rounded px-1 -mx-1 transition-colors"
-                        onClick={() => navToConversations({ dissatisfaction_severity: s.label })}
+                        onClick={(e) => navToConversations({ dissatisfaction_severity: s.label }, e)}
+                        onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); navToConversations({ dissatisfaction_severity: s.label }, e); } }}
                       >
                         <div className="flex items-center gap-1.5">
                           <div className="w-2.5 h-2.5 rounded-full" style={{ background: SEVERITY_COLORS[s.label] ?? COLORS[i % COLORS.length] }} />
@@ -740,7 +774,9 @@ export default function DashboardPage() {
                     margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
                     style={{ cursor: 'pointer' }}
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    onClick={(data: any) => { if (data?.activeLabel) navToConversations({ language: data.activeLabel }); }}
+                    onClick={(data: any, e: any) => { if (data?.activeLabel) navToConversations({ language: data.activeLabel }, e); }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    onMouseDown={(data: any, e: any) => { if (e?.button === 1 && data?.activeLabel) { e.preventDefault?.(); navToConversations({ language: data.activeLabel }, e); } }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -780,7 +816,8 @@ export default function DashboardPage() {
                           <tr
                             key={i}
                             className="hover:bg-slate-50 transition-colors cursor-pointer"
-                            onClick={() => navToConversations({ issue_category: item.category })}
+                            onClick={(e) => navToConversations({ issue_category: item.category }, e)}
+                            onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); navToConversations({ issue_category: item.category }, e); } }}
                           >
                             <td className="py-2.5 pr-4 text-slate-700 text-xs">{item.label}</td>
                             <td className="py-2.5 pr-4 text-slate-400 text-xs">{item.category}</td>
@@ -812,7 +849,8 @@ export default function DashboardPage() {
                       <div
                         key={i}
                         className="cursor-pointer group"
-                        onClick={() => navToConversations({ brand: b.label })}
+                        onClick={(e) => navToConversations({ brand: b.label }, e)}
+                        onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); navToConversations({ brand: b.label }, e); } }}
                       >
                         <div className="flex items-center justify-between text-xs mb-1">
                           <span className="text-slate-600 font-medium truncate max-w-[60%] group-hover:text-blue-600 transition-colors">{b.label}</span>
@@ -846,7 +884,8 @@ export default function DashboardPage() {
                         <tr
                           key={i}
                           className="hover:bg-slate-50 transition-colors cursor-pointer"
-                          onClick={() => navToConversations({ agent_name: a.label })}
+                          onClick={(e) => navToConversations({ agent_name: a.label }, e)}
+                          onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); navToConversations({ agent_name: a.label }, e); } }}
                         >
                           <td className="py-2.5 pr-4 text-slate-700 text-xs font-medium">{a.label}</td>
                           <td className="py-2.5 text-right">
@@ -867,7 +906,18 @@ export default function DashboardPage() {
         <ConversationsOverlay
           filters={overlayFilters}
           title={overlayTitle}
-          onClose={() => setOverlayFilters(null)}
+          onClose={() => {
+            setOverlayFilters(null);
+            if (typeof window !== 'undefined') {
+              const sp = new URLSearchParams(window.location.search);
+              if (sp.has('ov_filters') || sp.has('ov_title')) {
+                sp.delete('ov_filters');
+                sp.delete('ov_title');
+                const qs = sp.toString();
+                window.history.replaceState({}, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+              }
+            }
+          }}
         />
       )}
     </div>
