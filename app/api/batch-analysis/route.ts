@@ -73,8 +73,10 @@ function buildJsonlLine(conv: {
         { role: 'system', content: promptContent },
         { role: 'user', content: buildUserMessage(conv) },
       ],
-      temperature: 0.3,
-      max_tokens: 2048,
+      // gpt-5 family rejects 'max_tokens' (use 'max_completion_tokens') and
+      // most reasoning models only allow the default temperature, so we omit
+      // temperature rather than risk a 500-row batch failing on validation.
+      max_completion_tokens: 2048,
     },
   });
 }
