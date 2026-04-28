@@ -115,15 +115,21 @@ async function backfillAll(options: Options, apiKey: string | undefined): Promis
       }
 
       const rebuilt = truncateTranscript(formatTranscriptFromRawMessages(raw));
-      if (rebuilt === row.original_text) continue;
+      const transcriptChanged = rebuilt !== row.original_text;
+      const rawMessagesChanged = row.raw_messages !== raw;
 
-      stats.changed++;
+      // Skip only when the row already has matching raw_messages AND the
+      // transcript is correct — i.e. nothing to do. Previously we skipped on
+      // transcript-match alone, which dropped the refetched raw_messages on
+      // the floor and left those rows stuck with raw_messages IS NULL forever.
+      if (!transcriptChanged && !rawMessagesChanged) continue;
+
+      if (transcriptChanged) stats.changed++;
       if (options.dryRun) continue;
 
-      const updates: Record<string, unknown> = { original_text: rebuilt };
-      // Persist the refetched messages too so raw_messages and original_text
-      // stay coherent, matching what refresh-messages does.
-      if (row.raw_messages !== raw) updates.raw_messages = raw;
+      const updates: Record<string, unknown> = {};
+      if (transcriptChanged) updates.original_text = rebuilt;
+      if (rawMessagesChanged) updates.raw_messages = raw;
       if (options.clearSummaries && row.summary) {
         updates.summary = null;
         updates.last_prompt_id = null;
