@@ -223,6 +223,38 @@ export async function searchConversationsByDate(
   return results;
 }
 
+// ── Slim transcript-only fetch ─────────────────────────────────────────────
+//
+// Only hits /v1/conversations/{id} — skips the 5 contact/tags/companies/
+// segments/events follow-up calls that fetchIntercomData makes. Used by the
+// transcript backfill, which only writes raw_messages + original_text and
+// doesn't need player metadata. Cuts memory pressure and Intercom rate-limit
+// use ~6× per row.
+
+export async function fetchIntercomTranscriptOnly(
+  intercomId: string,
+  apiKey: string,
+): Promise<{ raw_messages: RawMessage[]; transcript: string }> {
+  const headers = intercomHeaders(apiKey);
+  const convRes = await fetchWithRateLimit(`https://api.intercom.io/conversations/${intercomId}`, { headers });
+  if (convRes.status === 429) throw new Error(`Intercom rate limit reached. ${rateLimitResetMsg(convRes)}`);
+  if (!convRes.ok) {
+    const body = await convRes.text();
+    console.error('Intercom conversation error:', body);
+    throw new Error(`Intercom API responded with ${convRes.status}`);
+  }
+  const conv = await convRes.json() as IntercomConversation;
+  const parts = conv.conversation_parts?.conversation_parts ?? [];
+  const commentParts = parts.filter((p) => p.part_type === 'comment' && p.body);
+  const rawMessages: RawMessage[] = commentParts.map((p) => ({
+    author_type: p.author.type ?? 'user',
+    body: stripHtml(p.body),
+    created_at: tsToIso(p.created_at),
+  }));
+  const transcript = truncateTranscript(formatTranscriptFromRawMessages(rawMessages));
+  return { raw_messages: rawMessages, transcript };
+}
+
 // ── Full conversation fetch ────────────────────────────────────────────────
 
 export async function fetchIntercomData(

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { waitUntil } from '@vercel/functions';
-import { formatTranscriptFromRawMessages, truncateTranscript, fetchIntercomData } from '@/lib/intercom';
+import { formatTranscriptFromRawMessages, truncateTranscript, fetchIntercomTranscriptOnly } from '@/lib/intercom';
 import { supabase } from '@/lib/supabase';
 import type { RawMessage } from '@/lib/types';
 
@@ -95,7 +95,7 @@ async function backfillAll(options: Options, apiKey: string | undefined): Promis
       let raw = row.raw_messages;
       if ((!raw || raw.length === 0) && options.refetchEmpty && row.intercom_id && apiKey) {
         try {
-          const fresh = await fetchIntercomData(row.intercom_id, apiKey);
+          const fresh = await fetchIntercomTranscriptOnly(row.intercom_id, apiKey);
           raw = fresh.raw_messages;
           stats.refetched++;
         } catch (e) {
