@@ -777,27 +777,43 @@ export async function getUnanalyzedConversationsByDate(date: string): Promise<Mi
   return (data ?? []) as MinimalConversation[];
 }
 
-// Returns a count only — no data transfer, used to pre-check before heavy work
-export async function countUnanalyzedConversations(): Promise<number> {
-  const { count, error } = await supabase
+// Returns a count only — no data transfer, used to pre-check before heavy work.
+// Optional fromDate/toDate (ISO strings) scope the count to a window of
+// intercom_created_at — used when a partial re-analysis is targeted at a date
+// range instead of the full backlog.
+export async function countUnanalyzedConversations(
+  filter?: { fromDate?: string; toDate?: string },
+): Promise<number> {
+  let query = supabase
     .from('conversations')
     .select('id', { count: 'exact', head: true })
     .is('summary', null)
     .not('original_text', 'is', null);
+  if (filter?.fromDate) query = query.gte('intercom_created_at', filter.fromDate);
+  if (filter?.toDate)   query = query.lte('intercom_created_at', filter.toDate);
+  const { count, error } = await query;
   if (error) throw new Error(`[db] count unanalyzed conversations: ${error.message}`);
   return count ?? 0;
 }
 
 // Fetches one page of unanalyzed conversations — used by the batch POST handler
 // so it can process 10k rows at a time instead of loading the full dataset at once.
-export async function getUnanalyzedConversationsPage(from: number, limit: number): Promise<MinimalConversation[]> {
-  const { data, error } = await supabase
+// Optional fromDate/toDate scope to a window of intercom_created_at.
+export async function getUnanalyzedConversationsPage(
+  from: number,
+  limit: number,
+  filter?: { fromDate?: string; toDate?: string },
+): Promise<MinimalConversation[]> {
+  let query = supabase
     .from('conversations')
     .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
     .is('summary', null)
     .not('original_text', 'is', null)
     .order('id')
     .range(from, from + limit - 1);
+  if (filter?.fromDate) query = query.gte('intercom_created_at', filter.fromDate);
+  if (filter?.toDate)   query = query.lte('intercom_created_at', filter.toDate);
+  const { data, error } = await query;
   if (error) throw new Error(`[db] get unanalyzed conversations page: ${error.message}`);
   return (data ?? []) as MinimalConversation[];
 }

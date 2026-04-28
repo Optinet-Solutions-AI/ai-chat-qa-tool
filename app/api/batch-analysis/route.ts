@@ -184,17 +184,37 @@ async function _POST(req: NextRequest) {
   const openAIKey = process.env.OPENAI_API_KEY;
   if (!openAIKey) return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
 
-  let body: { promptId?: string; promptContent?: string; testLimit?: number };
+  let body: {
+    promptId?: string;
+    promptContent?: string;
+    testLimit?: number;
+    fromDate?: string;
+    toDate?: string;
+  };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  const { promptId, promptContent, testLimit } = body;
+  const { promptId, promptContent, testLimit, fromDate, toDate } = body;
   if (!promptContent?.trim()) return NextResponse.json({ error: 'promptContent is required' }, { status: 400 });
+
+  // Normalize date filter — accept either YYYY-MM-DD (treated as UTC midnight)
+  // or a full ISO string. Empty/undefined → no filter.
+  const dateFilter: { fromDate?: string; toDate?: string } = {};
+  if (fromDate?.trim()) {
+    dateFilter.fromDate = /^\d{4}-\d{2}-\d{2}$/.test(fromDate.trim())
+      ? `${fromDate.trim()}T00:00:00Z`
+      : fromDate.trim();
+  }
+  if (toDate?.trim()) {
+    dateFilter.toDate = /^\d{4}-\d{2}-\d{2}$/.test(toDate.trim())
+      ? `${toDate.trim()}T23:59:59Z`
+      : toDate.trim();
+  }
 
   // Step 1 — fast count query (no data transfer) to fail early if nothing to do
   let totalAvailable: number;
   try {
-    totalAvailable = await countUnanalyzedConversations();
+    totalAvailable = await countUnanalyzedConversations(dateFilter);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
@@ -312,7 +332,7 @@ async function _POST(req: NextRequest) {
 
     let page: MinimalConversation[];
     try {
-      page = await getUnanalyzedConversationsPage(from, pageLimit);
+      page = await getUnanalyzedConversationsPage(from, pageLimit, dateFilter);
     } catch (e) {
       return NextResponse.json({ error: (e as Error).message }, { status: 500 });
     }
