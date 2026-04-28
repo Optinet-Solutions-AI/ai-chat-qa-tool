@@ -715,7 +715,7 @@ export default function ConversationDetail({ conversation, analysisRun, readOnly
                     ? 'bg-[#1b3a5c] text-white rounded-tr-sm'
                     : isBot
                       ? 'bg-white text-slate-800 rounded-tl-sm border border-slate-200 shadow-sm'
-                      : 'bg-slate-100 text-slate-600 rounded-tl-sm border border-slate-200'
+                      : 'bg-slate-300 text-slate-800 rounded-tl-sm border border-slate-400'
                   }`}
               >
                 {displayBody}
