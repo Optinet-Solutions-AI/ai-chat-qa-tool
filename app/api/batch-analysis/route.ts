@@ -21,12 +21,13 @@ export const maxDuration = 300;
 
 // ── Rate-limit / size guards ───────────────────────────────────────────────
 // OpenAI Batch API limits: 50k requests per file, 100 MB per file.
-// Chunk size dropped from 500 → 200 on 2026-04-29 after a single 500-chat
-// batch repeatedly failed with "Enqueued token limit reached" (gpt-5-mini org
-// cap is 5M enqueued tokens). Real-world transcripts average ~10–12k tokens
-// per request, so 500 × 12k ≈ 6M > 5M cap, while 200 × 12k ≈ 2.4M leaves
-// comfortable headroom. Must stay in sync with analyze-daily route.
-const MAX_REQUESTS_PER_CHUNK = 200;
+// Chunk size dropped from 500 → 200 → 150 on 2026-04-29 (must stay in sync
+// with the analyze-daily cron). 500 busted gpt-5-mini's 5M enqueued-token
+// org cap; 200 fit but produced 31/200 individual failures from reasoning-
+// budget exhaustion at max_completion_tokens=2048; 150 paired with
+// max_completion_tokens=4096 gives headroom on both: 150 × (12k input +
+// 4k output) ≈ 2.4M enqueued, well under the 5M cap.
+const MAX_REQUESTS_PER_CHUNK = 150;
 const MAX_FILE_BYTES = 90 * 1024 * 1024; // 90 MB hard cap
 // Held at 1 to stay under gpt-5-mini's 5M enqueued-token org cap (confirmed
 // by an "Enqueued token limit reached" failure on 2026-04-29 when this was 3).
@@ -79,8 +80,12 @@ function buildJsonlLine(conv: {
       ],
       // gpt-5 family rejects 'max_tokens' (use 'max_completion_tokens') and
       // most reasoning models only allow the default temperature, so we omit
-      // temperature rather than risk a 500-row batch failing on validation.
-      max_completion_tokens: 2048,
+      // temperature rather than risk the whole batch failing on validation.
+      // Bumped 2048 → 4096 on 2026-04-29: at 2048 a 200-chat batch came back
+      // with 31/200 individual failures because gpt-5-mini's internal
+      // reasoning tokens were exhausting the budget before the JSON output
+      // was produced.
+      max_completion_tokens: 4096,
     },
   });
 }

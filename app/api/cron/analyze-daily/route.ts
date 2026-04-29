@@ -18,13 +18,13 @@ import { ANALYSIS_MIN_DATE_ISO } from '@/lib/analyticsFilters';
 export const maxDuration = 300;
 
 // ── Constants ──────────────────────────────────────────────────────────────
-// Chunk size dropped from 500 → 200 on 2026-04-29 after a single 500-chat
-// batch repeatedly failed with "Enqueued token limit reached" (gpt-5-mini org
-// cap is 5M enqueued tokens). Real-world transcripts on this app average
-// ~10–12k tokens per request, so 500 × 12k ≈ 6M > 5M cap, while
-// 200 × 12k ≈ 2.4M leaves comfortable headroom. If batches start failing
-// again, drop this further.
-const MAX_REQUESTS_PER_CHUNK = 200;
+// Chunk size dropped from 500 → 200 → 150 on 2026-04-29. The 500 cap busted
+// the 5M gpt-5-mini org cap; the 200 cap fit but a 200-chat batch came back
+// with 31 failed individual requests (reasoning budget exhaustion at
+// max_completion_tokens=2048 — see buildJsonlLine). 150 paired with a
+// max_completion_tokens bump to 4096 gives headroom on both axes:
+// 150 × (12k input + 4k output) ≈ 2.4M enqueued, well under 5M.
+const MAX_REQUESTS_PER_CHUNK = 150;
 const MAX_FILE_BYTES = 90 * 1024 * 1024;
 // Held at 1 alongside the 200-chat chunk size. With both clamps, one cron run
 // enqueues ~2.4M tokens — safely under the 5M org cap even with another
@@ -80,8 +80,12 @@ function buildJsonlLine(conv: {
       ],
       // gpt-5 family rejects 'max_tokens' (use 'max_completion_tokens') and
       // most reasoning models only allow the default temperature, so we omit
-      // temperature rather than risk a 500-row batch failing on validation.
-      max_completion_tokens: 2048,
+      // temperature rather than risk the whole batch failing on validation.
+      // Bumped 2048 → 4096 on 2026-04-29: at 2048 a 200-chat batch came back
+      // with 31/200 individual failures because gpt-5-mini's internal
+      // reasoning tokens were exhausting the budget before the JSON output
+      // was produced.
+      max_completion_tokens: 4096,
     },
   });
 }
