@@ -804,12 +804,17 @@ export async function getUnanalyzedConversationsPage(
   limit: number,
   filter?: { fromDate?: string; toDate?: string },
 ): Promise<MinimalConversation[]> {
+  // Oldest first by Intercom creation time so a backlog clears in date order
+  // (April 27 fully analyzed before 28, before 29). `id` is a random cuid and
+  // does not correlate with chronology. The `id` tiebreaker keeps pagination
+  // stable when many rows share the same intercom_created_at.
   let query = supabase
     .from('conversations')
     .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
     .is('summary', null)
     .not('original_text', 'is', null)
-    .order('id')
+    .order('intercom_created_at', { ascending: true })
+    .order('id', { ascending: true })
     .range(from, from + limit - 1);
   if (filter?.fromDate) query = query.gte('intercom_created_at', filter.fromDate);
   if (filter?.toDate)   query = query.lte('intercom_created_at', filter.toDate);
