@@ -1,144 +1,39 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import {
-  countUnanalyzedConversations,
   getUnanalyzedConversationsPage,
   dbGetActivePrompt,
   dbGetBatchJobs,
   dbUpdateBatchJob,
-  dbInsertBatchJob,
   dbUpdateAnalysisFields,
   dbInsertAnalysisRun,
 } from '@/lib/db';
 import type { BatchJob, BatchJobStatus, AnalysisRun } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 import { ANALYSIS_MIN_DATE_ISO } from '@/lib/analyticsFilters';
+import { analyzeConversationSync } from '@/lib/analyze-sync';
 
 // Allow up to 5 minutes on Vercel Pro
 export const maxDuration = 300;
 
-// ── Constants ──────────────────────────────────────────────────────────────
-// Chunk size dropped from 500 → 200 → 150 on 2026-04-29. The 500 cap busted
-// the 5M gpt-5-mini org cap; the 200 cap fit but a 200-chat batch came back
-// with 31 failed individual requests (reasoning budget exhaustion at
-// max_completion_tokens=2048 — see buildJsonlLine). 150 paired with a
-// max_completion_tokens bump to 4096 gives headroom on both axes:
-// 150 × (12k input + 4k output) ≈ 2.4M enqueued, well under 5M.
-const MAX_REQUESTS_PER_CHUNK = 150;
-const MAX_FILE_BYTES = 90 * 1024 * 1024;
-// Held at 1 alongside the 200-chat chunk size. With both clamps, one cron run
-// enqueues ~2.4M tokens — safely under the 5M org cap even with another
-// batch in flight from a prior tick. Hourly cadence × 200 chats/run =
-// 4,800 chats/day capacity, comfortably above the 600–1000 daily volume.
-const MAX_CHUNKS_PER_RUN = 1;
+// ── Sync-analysis sizing ───────────────────────────────────────────────────
+// Each cron tick analyzes up to MAX_PER_TICK April-27+ conversations using
+// synchronous /v1/chat/completions calls (see lib/analyze-sync.ts). We process
+// in PARALLEL_CHUNK-size waves to spread tokens against gpt-5-mini's per-min
+// cap and to keep memory bounded. With CHUNK_DELAY_MS between waves the cron
+// stays well under the 300s Vercel function timeout.
+//
+// Capacity = MAX_PER_TICK × 24 ticks/day = 960 chats/day, comfortably above
+// the 600–1000 daily volume target. If volume grows, raise MAX_PER_TICK and
+// re-tune the chunking math.
+const MAX_PER_TICK = 40;
+const PARALLEL_CHUNK = 10;
+const CHUNK_DELAY_MS = 5_000;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function yesterdayUtc(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function buildUserMessage(conv: {
-  intercom_id: string | null;
-  player_name: string | null;
-  player_email: string | null;
-  agent_name: string | null;
-  brand: string | null;
-  original_text: string | null;
-}): string {
-  return [
-    `Conversation ID: ${conv.intercom_id ?? 'N/A'}`,
-    `Player: ${conv.player_name ?? 'Unknown'} (${conv.player_email ?? 'no email'})`,
-    `Agent: ${conv.agent_name ?? 'Unknown'}`,
-    `Brand: ${conv.brand ?? 'Unknown'}`,
-    '',
-    'Transcript:',
-    conv.original_text ?? '',
-  ].join('\n');
-}
-
-function buildJsonlLine(conv: {
-  id: string;
-  intercom_id: string | null;
-  player_name: string | null;
-  player_email: string | null;
-  agent_name: string | null;
-  brand: string | null;
-  original_text: string | null;
-}, promptContent: string): string {
-  return JSON.stringify({
-    custom_id: `conv-${conv.id}`,
-    method: 'POST',
-    url: '/v1/chat/completions',
-    body: {
-      model: 'gpt-5-mini',
-      messages: [
-        { role: 'system', content: promptContent },
-        { role: 'user', content: buildUserMessage(conv) },
-      ],
-      // gpt-5 family rejects 'max_tokens' (use 'max_completion_tokens') and
-      // most reasoning models only allow the default temperature, so we omit
-      // temperature rather than risk the whole batch failing on validation.
-      // Bumped 2048 → 4096 on 2026-04-29: at 2048 a 200-chat batch came back
-      // with 31/200 individual failures because gpt-5-mini's internal
-      // reasoning tokens were exhausting the budget before the JSON output
-      // was produced.
-      max_completion_tokens: 4096,
-    },
-  });
-}
-
-function chunkLines(lines: string[]): string[][] {
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  let currentBytes = 0;
-  for (const line of lines) {
-    const lineBytes = Buffer.byteLength(line, 'utf8') + 1;
-    if (
-      current.length >= MAX_REQUESTS_PER_CHUNK ||
-      (current.length > 0 && currentBytes + lineBytes > MAX_FILE_BYTES)
-    ) {
-      chunks.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(line);
-    currentBytes += lineBytes;
-  }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
-}
-
-async function uploadJsonlToOpenAI(lines: string[], fileName: string, apiKey: string): Promise<string> {
-  const blob = new Blob([lines.join('\n')], { type: 'application/jsonl' });
-  const form = new FormData();
-  form.append('purpose', 'batch');
-  form.append('file', blob, fileName);
-  const res = await fetch('https://api.openai.com/v1/files', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`OpenAI file upload failed: ${data.error?.message ?? res.status}`);
-  return data.id as string;
-}
-
-async function createOpenAIBatch(fileId: string, apiKey: string): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/batches', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      input_file_id: fileId,
-      endpoint: '/v1/chat/completions',
-      completion_window: '24h',
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`OpenAI batch create failed: ${data.error?.message ?? res.status}`);
-  return data.id as string;
+function sleep(ms: number) {
+  return new Promise<void>((res) => setTimeout(res, ms));
 }
 
 function mapOpenAIStatus(s: string): BatchJobStatus {
@@ -157,15 +52,17 @@ function mapOpenAIStatus(s: string): BatchJobStatus {
 
 // ── GET /api/cron/analyze-daily ────────────────────────────────────────────
 //
-// Step A — Poll OpenAI for active batch jobs, then auto-import any that are
-//           complete so results appear in the DB without manual intervention.
+// Step A — Drain any leftover OpenAI Batch jobs from the previous Batch-API-
+//          based architecture: poll their status, import any that completed.
+//          Once the backlog of Batch jobs is gone this is a no-op.
 //
-// Step B — Find ALL conversations with no summary and submit them as a new
-//           OpenAI batch job using the active prompt. Skips submission when
-//           active batch jobs are still in-flight (they already cover the
-//           unanalyzed set), so conversations are never submitted twice.
+// Step B — Synchronously analyze up to MAX_PER_TICK unanalyzed April-27+
+//          conversations via /v1/chat/completions (parallel waves of
+//          PARALLEL_CHUNK). Replaces the prior Batch-API submission path,
+//          which was unreliable on this org (74% historical failure rate,
+//          batches stalling at 0/N for hours).
 //
-// Schedule this cron 1 hour after collect-daily (e.g. 3 AM CEST).
+// Schedule: hourly at :30 UTC, paired with collect-daily at :00 UTC.
 
 export async function GET(req: NextRequest) {
   // ── Auth ─────────────────────────────────────────────────────────────────
@@ -184,17 +81,17 @@ export async function GET(req: NextRequest) {
 
   let autoImportedJobs = 0;
   let autoImportedConversations = 0;
-  let newBatchJobs = 0;
-  let newBatchConversations = 0;
 
-  // ── STEP A: Poll active jobs + auto-import completed ones ─────────────────
+  // ── STEP A: Drain leftover Batch jobs ─────────────────────────────────────
+  // Keeps the old async-Batch path's bookkeeping correct for any in-flight or
+  // completed-not-yet-imported jobs that exist from before the sync switchover.
+  // Once those are all imported/cancelled this entire block becomes a no-op.
   const activeStatuses: BatchJobStatus[] = ['validating', 'in_progress', 'finalizing'];
-  let hasActiveJobs = false;
 
   try {
     const jobs = await dbGetBatchJobs();
 
-    // 1. Poll OpenAI to refresh statuses for active jobs
+    // 1. Poll OpenAI to refresh statuses for any active jobs
     for (const job of jobs.filter((j) => j.openai_batch_id && activeStatuses.includes(j.status))) {
       try {
         const res = await fetch(`https://api.openai.com/v1/batches/${job.openai_batch_id}`, {
@@ -205,10 +102,8 @@ export async function GET(req: NextRequest) {
         const newStatus = mapOpenAIStatus(b.status);
         const patch: Partial<BatchJob> = { status: newStatus };
 
-        // OpenAI's request_counts populates while a batch is in_progress, so
-        // mirror those into the DB on every poll. This gives the /batch-analysis
-        // UI a live "X/N processed" progress bar instead of jumping 0% → 100%
-        // only after the batch finishes.
+        // Mirror live progress counts into the DB on every poll so the
+        // /batch-analysis UI shows real progress instead of 0% → 100% jump.
         const oaCompleted = b.request_counts?.completed ?? null;
         const oaFailed = b.request_counts?.failed ?? null;
         if (oaCompleted != null && oaCompleted !== job.completed_conversations) {
@@ -305,80 +200,42 @@ export async function GET(req: NextRequest) {
         autoImportedConversations += imported - startAt;
       } catch { continue; }
     }
-
-    // Check if any jobs are still active after polling (Step B should wait)
-    hasActiveJobs = jobs.some((j) => activeStatuses.includes(j.status));
   } catch (e) {
     console.error('[cron] analyze-daily step A error:', e);
   }
 
-  // ── STEP B: Submit batch for ALL unanalyzed conversations ─────────────────
-  //
-  // Skip when active batch jobs exist — they already cover the unanalyzed set
-  // and we don't want to submit the same conversations twice. On the next daily
-  // run, Step A will import those results and Step B will pick up any new ones.
-  try {
-    if (hasActiveJobs) {
-      console.log('[cron] analyze-daily step B skipped: active batch jobs still in-flight');
-    } else {
-      // Floor to ANALYSIS_MIN_DATE_ISO so the cron only analyzes conversations
-      // from the dashboard cutoff onward — pre-cutoff rows stay in the DB but
-      // are intentionally skipped (no OpenAI spend on data the dashboard won't
-      // show anyway).
-      const dateFilter = { fromDate: ANALYSIS_MIN_DATE_ISO };
-      const totalUnanalyzed = await countUnanalyzedConversations(dateFilter);
+  // ── STEP B: Synchronously analyze unanalyzed April-27+ conversations ──────
+  // Replaces the prior Batch-API submission path. Each tick processes up to
+  // MAX_PER_TICK conversations in parallel waves, writing summaries inline.
+  // Failed conversations stay summary-IS-NULL and are picked up next tick.
 
-      if (totalUnanalyzed === 0) {
+  let syncAnalyzed = 0;
+  let syncFailed = 0;
+
+  try {
+    const prompt = await dbGetActivePrompt();
+    if (!prompt) {
+      console.warn('[cron] analyze-daily step B: no active prompt found');
+    } else {
+      const dateFilter = { fromDate: ANALYSIS_MIN_DATE_ISO };
+      const conversations = await getUnanalyzedConversationsPage(0, MAX_PER_TICK, dateFilter);
+
+      if (conversations.length === 0) {
         console.log('[cron] analyze-daily step B: no unanalyzed conversations');
       } else {
-        const prompt = await dbGetActivePrompt();
-        if (!prompt) {
-          console.warn('[cron] analyze-daily step B: no active prompt found');
-        } else {
-          // Only load enough rows for the 1 chunk we'll actually submit this
-          // run. Loading all 25k+ unanalyzed into memory just to slice 500 of
-          // them was OOM'ing the function (each row carries up to 60KB of
-          // original_text, ~500MB total at scale → 500s).
-          const targetRows = MAX_REQUESTS_PER_CHUNK * MAX_CHUNKS_PER_RUN;
-          const page = await getUnanalyzedConversationsPage(0, targetRows, dateFilter);
-          const lines = page.map((c) => buildJsonlLine(c, prompt.content));
-          const chunks = chunkLines(lines);
-          const totalChunks = Math.ceil(totalUnanalyzed / MAX_REQUESTS_PER_CHUNK);
-          const now = new Date().toISOString();
-
-          for (let i = 0; i < chunks.length && newBatchJobs < MAX_CHUNKS_PER_RUN; i++) {
-            const chunk = chunks[i];
-            const jobId = generateId();
-            try {
-              const fileName = `daily_${yesterdayUtc()}_chunk_${i}_${Date.now()}.jsonl`;
-              const fileId = await uploadJsonlToOpenAI(chunk, fileName, openAIKey);
-              const batchId = await createOpenAIBatch(fileId, openAIKey);
-
-              await dbInsertBatchJob({
-                id: jobId,
-                openai_batch_id: batchId,
-                openai_file_id: fileId,
-                output_file_id: null,
-                status: 'validating',
-                prompt_id: prompt.id,
-                prompt_content: prompt.content,
-                chunk_index: i,
-                total_chunks: totalChunks,
-                total_conversations: chunk.length,
-                completed_conversations: 0,
-                failed_conversations: 0,
-                imported_count: 0,
-                error_message: null,
-                created_at: now,
-                submitted_at: now,
-                completed_at: null,
-              });
-
-              newBatchJobs++;
-              newBatchConversations += chunk.length;
-            } catch (e) {
-              console.error(`[cron] analyze-daily chunk ${i} failed:`, e);
-            }
+        for (let i = 0; i < conversations.length; i += PARALLEL_CHUNK) {
+          const wave = conversations.slice(i, i + PARALLEL_CHUNK);
+          const settled = await Promise.allSettled(
+            wave.map((conv) => analyzeConversationSync(conv, prompt, openAIKey)),
+          );
+          for (const r of settled) {
+            if (r.status === 'fulfilled' && r.value.status === 'analyzed') syncAnalyzed++;
+            else syncFailed++;
+          }
+          // Pause between waves to spread tokens against the per-min rate cap
+          // (don't sleep after the last wave — pointless before returning).
+          if (i + PARALLEL_CHUNK < conversations.length) {
+            await sleep(CHUNK_DELAY_MS);
           }
         }
       }
@@ -388,11 +245,11 @@ export async function GET(req: NextRequest) {
   }
 
   console.log(
-    `[cron] analyze-daily: auto_imported=${autoImportedConversations} new_batch=${newBatchConversations}`,
+    `[cron] analyze-daily: auto_imported=${autoImportedConversations} sync_analyzed=${syncAnalyzed} sync_failed=${syncFailed}`,
   );
 
   return NextResponse.json({
     auto_imported: { jobs: autoImportedJobs, conversations: autoImportedConversations },
-    new_batch: { jobs: newBatchJobs, conversations: newBatchConversations },
+    sync: { analyzed: syncAnalyzed, failed: syncFailed },
   });
 }
