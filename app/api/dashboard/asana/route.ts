@@ -1,21 +1,33 @@
 import { NextResponse } from 'next/server';
-import { dbCountAsanaTickets } from '@/lib/db';
+import { dbGetAsanaReportingMetrics } from '@/lib/db';
 import { isAsanaConfigured } from '@/lib/asana';
 
-// Stub metrics endpoint for the Asana reporting page. Will grow as we decide
-// what's worth showing once tickets are flowing — for now just exposes whether
-// the integration is wired up and how many tickets have been created.
+// Reporting metrics for the AM action-items dashboard. Pivots are done in JS
+// against the conversations table — see dbGetAsanaReportingMetrics for the
+// exact shape.
 export async function GET() {
   try {
-    const totalTickets = await dbCountAsanaTickets();
+    const metrics = await dbGetAsanaReportingMetrics();
     return NextResponse.json({
       configured: isAsanaConfigured(),
       projectGid: process.env.ASANA_PROJECT_GID ?? null,
-      totalTickets,
+      ...metrics,
     });
   } catch (e) {
     return NextResponse.json(
-      { configured: isAsanaConfigured(), totalTickets: 0, error: (e as Error).message },
+      {
+        configured: isAsanaConfigured(),
+        projectGid: process.env.ASANA_PROJECT_GID ?? null,
+        totalTickets: 0,
+        openTickets: 0,
+        closedTickets: 0,
+        ticketsByAm: [],
+        ticketsBySeverity: [],
+        ticketsByCategory: [],
+        ticketsByDate: [],
+        lastSyncedAt: null,
+        error: (e as Error).message,
+      },
       { status: 500 },
     );
   }

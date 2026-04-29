@@ -129,6 +129,7 @@ export async function GET(req: NextRequest) {
     playerEmail: ctx.player_email,
     agentName: ctx.agent_name,
     agentEmail: ctx.agent_email,
+    accountManager: ctx.account_manager,
     brand: ctx.brand,
     severity: normalizedSev ?? 'Test',
     resolutionStatus: parsed.resolution_status,

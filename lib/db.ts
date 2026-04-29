@@ -882,6 +882,7 @@ export interface AsanaConversationContext {
   agent_name: string | null;
   agent_email: string | null;
   brand: string | null;
+  account_manager: string | null;
   asana_task_gid: string | null;
 }
 
@@ -890,7 +891,7 @@ export async function dbGetAsanaConversationContext(
 ): Promise<AsanaConversationContext | null> {
   const { data, error } = await supabase
     .from('conversations')
-    .select('id, intercom_id, player_name, player_email, agent_name, agent_email, brand, asana_task_gid')
+    .select('id, intercom_id, player_name, player_email, agent_name, agent_email, brand, account_manager, asana_task_gid')
     .eq('id', id)
     .single();
   if (error || !data) return null;
@@ -912,6 +913,144 @@ export async function dbCountAsanaTickets(): Promise<number> {
     .not('asana_task_gid', 'is', null);
   if (error) throw new Error(`[db] count asana tickets: ${error.message}`);
   return count ?? 0;
+}
+
+// Returns every ticket gid we know about, paired with its conversation id.
+// Used by the sync-asana-statuses endpoint to map Asana's view of completion
+// back onto our rows.
+export async function dbListAllAsanaTickets(): Promise<
+  Array<{ id: string; asana_task_gid: string }>
+> {
+  const PAGE = 1000;
+  const out: Array<{ id: string; asana_task_gid: string }> = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, asana_task_gid')
+      .not('asana_task_gid', 'is', null)
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`[db] list asana tickets: ${error.message}`);
+    const rows = (data ?? []) as Array<{ id: string; asana_task_gid: string | null }>;
+    for (const r of rows) {
+      if (r.asana_task_gid) out.push({ id: r.id, asana_task_gid: r.asana_task_gid });
+    }
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
+// Pulls every ticketed row in one paginated sweep and pivots in JS — same
+// pattern the dashboard uses for severity/category since those values live
+// inside the summary JSON. Returns the slim shape the reporting page needs;
+// the caller decides which slices to render.
+export interface AsanaReportingMetrics {
+  totalTickets: number;
+  openTickets: number;
+  closedTickets: number;
+  ticketsByAm: Array<{ label: string; count: number }>;
+  ticketsBySeverity: Array<{ label: string; count: number }>;
+  ticketsByCategory: Array<{ label: string; count: number }>;
+  ticketsByDate: Array<{ date: string; count: number }>;       // YYYY-MM-DD, sorted asc
+  lastSyncedAt: string | null;                                  // most recent asana_completed_at write
+}
+
+export async function dbGetAsanaReportingMetrics(): Promise<AsanaReportingMetrics> {
+  const PAGE = 1000;
+  type Row = {
+    id: string;
+    account_manager: string | null;
+    summary: string | null;
+    analyzed_at: string | null;
+    asana_completed_at: string | null;
+  };
+  const rows: Row[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, account_manager, summary, analyzed_at, asana_completed_at')
+      .not('asana_task_gid', 'is', null)
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`[db] asana reporting: ${error.message}`);
+    const page = (data ?? []) as Row[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    from += PAGE;
+  }
+
+  let openTickets = 0;
+  let closedTickets = 0;
+  const amCounts = new Map<string, number>();
+  const sevCounts = new Map<string, number>();
+  const catCounts = new Map<string, number>();
+  const dateCounts = new Map<string, number>();
+  let lastSyncedAt: string | null = null;
+
+  for (const r of rows) {
+    if (r.asana_completed_at) {
+      closedTickets += 1;
+      if (!lastSyncedAt || r.asana_completed_at > lastSyncedAt) lastSyncedAt = r.asana_completed_at;
+    } else {
+      openTickets += 1;
+    }
+
+    const am = (r.account_manager ?? '').trim() || 'Unassigned';
+    amCounts.set(am, (amCounts.get(am) ?? 0) + 1);
+
+    const parsed = parseAnalysisSummary(r.summary);
+    const sev = normalizeSeverity(parsed.dissatisfaction_severity) ?? 'Unknown';
+    sevCounts.set(sev, (sevCounts.get(sev) ?? 0) + 1);
+
+    // A single conversation can flag multiple categories — count each once
+    // per ticket so the bar chart shows ticket-coverage rather than weighted
+    // sums (matches how the main dashboard counts top categories).
+    const seen = new Set<string>();
+    for (const item of parsed.results ?? []) {
+      const c = String(item.category ?? '').trim();
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      catCounts.set(c, (catCounts.get(c) ?? 0) + 1);
+    }
+
+    if (r.analyzed_at) {
+      const date = r.analyzed_at.slice(0, 10);                  // YYYY-MM-DD in UTC
+      dateCounts.set(date, (dateCounts.get(date) ?? 0) + 1);
+    }
+  }
+
+  const sortDesc = (a: { count: number }, b: { count: number }) => b.count - a.count;
+  return {
+    totalTickets: rows.length,
+    openTickets,
+    closedTickets,
+    ticketsByAm: [...amCounts].map(([label, count]) => ({ label, count })).sort(sortDesc),
+    ticketsBySeverity: [...sevCounts].map(([label, count]) => ({ label, count })).sort(sortDesc),
+    ticketsByCategory: [...catCounts].map(([label, count]) => ({ label, count })).sort(sortDesc).slice(0, 10),
+    ticketsByDate: [...dateCounts]
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    lastSyncedAt,
+  };
+}
+
+// Concurrent UPDATEs keyed by id. Mirrors dbBatchUpdateAnalysisFields' shape.
+export async function dbBatchUpdateAsanaStatus(
+  updates: Array<{ id: string; completedAt: string | null }>,
+): Promise<void> {
+  if (updates.length === 0) return;
+  await Promise.all(
+    updates.map(({ id, completedAt }) =>
+      supabase
+        .from('conversations')
+        .update({ asana_completed_at: completedAt })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) throw new Error(`[db] update asana_completed_at (${id}): ${error.message}`);
+        }),
+    ),
+  );
 }
 
 // ── Load all state ─────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import type { BatchJob, BatchJobStatus, AnalysisRun } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 import { ANALYSIS_MIN_DATE_ISO } from '@/lib/analyticsFilters';
 import { analyzeConversationSync } from '@/lib/analyze-sync';
+import { maybeCreateAsanaTicketForConversation } from '@/lib/asana';
 
 // Allow up to 5 minutes on Vercel Pro
 export const maxDuration = 300;
@@ -186,6 +187,11 @@ export async function GET(req: NextRequest) {
               alert_reason: null,
             };
             await dbInsertAnalysisRun(run);
+
+            // Severity-3 → push an Asana action-item ticket. Helper internally
+            // dedups via asana_task_gid and swallows all errors so a flaky
+            // Asana API can never break the import loop.
+            await maybeCreateAsanaTicketForConversation(convId, analysisText);
 
             imported++;
           } catch { continue; }

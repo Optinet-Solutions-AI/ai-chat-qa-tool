@@ -14,6 +14,7 @@ import {
 } from '@/lib/db';
 import type { BatchJob, BatchJobStatus, AnalysisRun } from '@/lib/types';
 import { generateId } from '@/lib/utils';
+import { maybeCreateAsanaTicketForConversation } from '@/lib/asana';
 
 // Allow up to 5 minutes — fetching 26k+ rows in pages + uploading to OpenAI
 // takes well over the default 10s Vercel limit.
@@ -529,12 +530,20 @@ export async function PATCH(req: NextRequest) {
 
   const flushBatch = async () => {
     if (convBatch.length === 0) return;
+    // Snapshot before clearing so we can run Asana pushes against the same
+    // rows after the DB writes commit. The helper internally filters to
+    // severity-3 only, dedups via asana_task_gid, and swallows all errors —
+    // so a flaky Asana API can never break the import.
+    const justFlushed = convBatch.slice();
     await Promise.all([
       dbBatchUpdateAnalysisFields(convBatch),
       dbBatchInsertAnalysisRuns(runBatch),
     ]);
     convBatch = [];
     runBatch = [];
+    await Promise.all(
+      justFlushed.map((r) => maybeCreateAsanaTicketForConversation(r.id, r.summary)),
+    );
   };
 
   for (let i = startAt; i < lines.length; i++) {
