@@ -73,6 +73,7 @@ function mapConversationRow(c: Record<string, any>, notes: ConversationNote[] = 
     raw_messages_translated: c.raw_messages_translated ?? null,
     last_prompt_id: c.last_prompt_id ?? null,
     last_prompt_content: c.last_prompt_content ?? null,
+    asana_task_gid: c.asana_task_gid ?? null,
     notes,
   };
 }
@@ -149,6 +150,7 @@ function conversationRow(c: Conversation) {
     raw_messages_translated: c.raw_messages_translated ?? null,
     last_prompt_id: c.last_prompt_id,
     last_prompt_content: c.last_prompt_content,
+    asana_task_gid: c.asana_task_gid ?? null,
   };
 }
 
@@ -865,6 +867,51 @@ export async function dbBatchInsertAnalysisRuns(runs: import('@/lib/types').Anal
   if (runs.length === 0) return;
   const { error } = await supabase.from('analysis_runs').insert(runs);
   if (error) throw new Error(`[db] batch insert analysis runs: ${error.message} (code: ${error.code})`);
+}
+
+// ── Asana ticket linkage ───────────────────────────────────────────────────
+// Severity-3 analysis results push a task into Asana via lib/asana.ts; the
+// returned gid is stored here so re-analysis of the same conversation does
+// not duplicate the ticket.
+
+export interface AsanaConversationContext {
+  id: string;
+  intercom_id: string | null;
+  player_name: string | null;
+  player_email: string | null;
+  agent_name: string | null;
+  agent_email: string | null;
+  brand: string | null;
+  asana_task_gid: string | null;
+}
+
+export async function dbGetAsanaConversationContext(
+  id: string,
+): Promise<AsanaConversationContext | null> {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, intercom_id, player_name, player_email, agent_name, agent_email, brand, asana_task_gid')
+    .eq('id', id)
+    .single();
+  if (error || !data) return null;
+  return data as AsanaConversationContext;
+}
+
+export async function dbUpdateAsanaTaskGid(id: string, gid: string): Promise<void> {
+  const { error } = await supabase
+    .from('conversations')
+    .update({ asana_task_gid: gid })
+    .eq('id', id);
+  if (error) throw new Error(`[db] update asana_task_gid (${id}): ${error.message}`);
+}
+
+export async function dbCountAsanaTickets(): Promise<number> {
+  const { count, error } = await supabase
+    .from('conversations')
+    .select('id', { count: 'exact', head: true })
+    .not('asana_task_gid', 'is', null);
+  if (error) throw new Error(`[db] count asana tickets: ${error.message}`);
+  return count ?? 0;
 }
 
 // ── Load all state ─────────────────────────────────────────────────────────

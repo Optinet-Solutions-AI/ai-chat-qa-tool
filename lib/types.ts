@@ -105,6 +105,10 @@ export interface Conversation {
   last_prompt_id: string | null;
   last_prompt_content: string | null;
 
+  // Asana ticket ID — set when the analysis pipeline pushes a severity-3
+  // conversation to Asana. Used for dedup so re-analysis doesn't double-create.
+  asana_task_gid?: string | null;
+
   // Derived — stored for efficient filtering
   account_manager: string | null;
 

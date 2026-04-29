@@ -83,8 +83,17 @@ function IconDashboard() {
   );
 }
 
+function IconTicket() {
+  return (
+    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
+  { href: '/dashboard/asana', label: 'Asana Tickets', icon: <IconTicket /> },
   { href: '/ask-ai', label: 'Ask AI', icon: <IconSparkle /> },
   { href: '/', label: 'Conversations', icon: <IconChat /> },
   { href: '/collect', label: 'Collect', icon: <IconCollect /> },
@@ -99,6 +108,8 @@ export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, o
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/' || pathname.startsWith('/conversations/');
+    // Exact-match /dashboard so /dashboard/asana doesn't double-highlight.
+    if (href === '/dashboard') return pathname === '/dashboard';
     return pathname === href || pathname.startsWith(href + '/');
   };
 
