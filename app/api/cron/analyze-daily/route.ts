@@ -24,13 +24,14 @@ export const maxDuration = 300;
 // token_limit_exceeded, drop this further.
 const MAX_REQUESTS_PER_CHUNK = 500;
 const MAX_FILE_BYTES = 90 * 1024 * 1024;
-// Submit up to 3 batches per cron run so a 600–1500 chat day can be sent to
-// OpenAI in a single hourly run instead of trickling out one batch/hour. With
-// 500 chats/batch and ~3k input tokens/chat, 3 batches ≈ 4.5M enqueued tokens
-// — well under gpt-5-mini's tier cap. If a batch fails with
-// token_limit_exceeded the per-chunk try/catch logs and continues, so previous
-// chunks already submitted are not lost.
-const MAX_CHUNKS_PER_RUN = 3;
+// gpt-5-mini org cap is 5,000,000 enqueued tokens (confirmed by an
+// "Enqueued token limit reached" failure on 2026-04-29 when MAX_CHUNKS_PER_RUN
+// was 3). A 500-chat batch averages ~2.5–3.5M tokens (longer transcripts than
+// originally sized for, plus 2048 output budget per request), so we hold this
+// at 1 to leave room for any concurrently in-flight batch from a prior tick.
+// Hourly cadence at 500 chats/run = 12k chats/day capacity — comfortably
+// above the 600–1000 daily volume target.
+const MAX_CHUNKS_PER_RUN = 1;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

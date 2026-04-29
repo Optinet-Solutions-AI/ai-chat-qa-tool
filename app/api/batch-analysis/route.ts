@@ -27,13 +27,14 @@ export const maxDuration = 300;
 // if a batch fails with token_limit_exceeded, drop this further.
 const MAX_REQUESTS_PER_CHUNK = 500;
 const MAX_FILE_BYTES = 90 * 1024 * 1024; // 90 MB hard cap
-// Submit up to 3 OpenAI batches per POST call so a single manual trigger can
-// flush a 1500-chat backlog in one shot. With 500 chats/batch and ~3k input
-// tokens/chat, 3 batches ≈ 4.5M enqueued tokens — well under gpt-5-mini's tier
-// cap. The per-chunk try/catch logs token_limit_exceeded and continues, so
-// previous chunks already submitted are not lost. Matches MAX_CHUNKS_PER_RUN
-// in the analyze-daily cron.
-const MAX_CHUNKS_PER_SUBMISSION = 3;
+// Held at 1 to stay under gpt-5-mini's 5M enqueued-token org cap (confirmed
+// by an "Enqueued token limit reached" failure on 2026-04-29 when this was 3).
+// A 500-chat batch is ~2.5–3.5M tokens, so 1 leaves headroom for any other
+// in-flight batch from the analyze-daily cron. Re-call POST after the current
+// batch completes — the endpoint re-queries WHERE summary IS NULL, so it
+// naturally picks up where it left off with no risk of re-processing.
+// Matches MAX_CHUNKS_PER_RUN in the analyze-daily cron.
+const MAX_CHUNKS_PER_SUBMISSION = 1;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
