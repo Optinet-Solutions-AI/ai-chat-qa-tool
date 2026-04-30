@@ -49,6 +49,12 @@
 //                                ASANA_AM_USER_MAP doesn't cover them. If
 //                                unset we derive it from the configured
 //                                project's workspace.gid.
+//   ASANA_DISABLE_AM_ASSIGNEE    Set to "true" to skip setting the AM as the
+//                                Asana assignee (so they don't get notified).
+//                                Tickets are still created, routed to the AM
+//                                column, and tagged with the AM field — only
+//                                the assignee is omitted. Unset/anything else
+//                                = normal behaviour.
 //   NEXT_PUBLIC_APP_URL          Base URL used for the QA-tool back-link
 //   NEXT_PUBLIC_INTERCOM_APP_ID  Used for the Intercom inbox back-link
 //
@@ -907,8 +913,13 @@ export async function createAsanaTaskForConversation(
   // AMs like "Geri/Nik" or display-name mismatches), otherwise we look the
   // AM up by name in the workspace user list. Unresolvable AMs leave the
   // ticket unassigned and log a warning — creation still succeeds.
-  const assigneeGid = await resolveAssigneeForAm(input.accountManager);
-  if (!assigneeGid && input.accountManager) {
+  // ASANA_DISABLE_AM_ASSIGNEE=true skips assignee entirely so AMs don't get
+  // notified while escalation criteria are still being finalised.
+  const amAssigneeDisabled = process.env.ASANA_DISABLE_AM_ASSIGNEE === 'true';
+  const assigneeGid = amAssigneeDisabled
+    ? null
+    : await resolveAssigneeForAm(input.accountManager);
+  if (!amAssigneeDisabled && !assigneeGid && input.accountManager) {
     console.warn(`[asana] could not resolve assignee for account manager: ${input.accountManager}`);
   }
 
