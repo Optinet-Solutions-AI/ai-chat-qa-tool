@@ -52,14 +52,16 @@ export async function analyzeConversationSync(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: prompt.content },
           { role: 'user', content: buildUserMessage(conv) },
         ],
-        // gpt-5-mini reasoning consumes tokens before producing output;
-        // 4096 was the empirical floor at which per-request failures stopped.
-        max_completion_tokens: 4096,
+        // Match the manual "Run QA" button (app/api/conversation/route.ts) so
+        // automated cron output is identical to on-demand analysis. gpt-5-mini
+        // produced divergent verdicts (e.g. "Unresolved" / "Slow response times"
+        // where gpt-4o gives "Resolved" / "Delayed Follow-Ups").
+        temperature: 0.3,
       }),
     });
 
