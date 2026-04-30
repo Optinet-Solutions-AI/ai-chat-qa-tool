@@ -5,7 +5,7 @@ import {
   dbGetActivePrompt,
 } from '@/lib/db';
 import { ANALYSIS_MIN_DATE_ISO } from '@/lib/analyticsFilters';
-import { analyzeConversationSync, type SyncAnalysisResult } from '@/lib/analyze-sync';
+import { analyzeBatchSequential } from '@/lib/analyze-sync';
 
 // Manual sync-analysis catch-up — used when the autonomous cron is behind or
 // when verifying the sync path during incidents. The hourly cron uses the
@@ -15,7 +15,8 @@ import { analyzeConversationSync, type SyncAnalysisResult } from '@/lib/analyze-
 // POST /api/admin/sync-analyze?limit=N
 //   - Authenticates with CRON_SECRET
 //   - Pulls N (default 5, max 10) oldest unanalyzed April-27+ conversations
-//   - Runs them through gpt-5-mini in parallel
+//   - Runs them through gpt-4o sequentially via analyzeBatchSequential (15s
+//     spacing to fit the 30k TPM cap)
 //   - Writes summaries + analysis_runs inline
 export const maxDuration = 300;
 
@@ -50,20 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No unanalyzed April-27+ conversations remain.', analyzed: 0, failed: 0 });
   }
 
-  const settled = await Promise.allSettled(
-    conversations.map((conv) => analyzeConversationSync(conv, prompt, apiKey)),
-  );
-
-  const results: SyncAnalysisResult[] = settled.map((s) =>
-    s.status === 'fulfilled'
-      ? s.value
-      : {
-          conversation_id: 'unknown',
-          intercom_id: null,
-          status: 'failed' as const,
-          error: s.reason instanceof Error ? s.reason.message : String(s.reason),
-        },
-  );
+  const results = await analyzeBatchSequential(conversations, prompt, apiKey);
 
   const analyzed = results.filter((r) => r.status === 'analyzed').length;
   const failed = results.filter((r) => r.status === 'failed').length;

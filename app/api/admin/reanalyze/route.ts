@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { dbGetConversationsByIds, dbGetActivePrompt } from '@/lib/db';
-import { analyzeConversationSync, type SyncAnalysisResult } from '@/lib/analyze-sync';
+import { analyzeBatchSequential } from '@/lib/analyze-sync';
 
 // Force re-analysis of specific conversations by id, regardless of whether
 // they already have a summary. Used to verify model/prompt changes against
@@ -10,11 +10,11 @@ import { analyzeConversationSync, type SyncAnalysisResult } from '@/lib/analyze-
 // POST /api/admin/reanalyze?ids=<id1>,<id2>,...
 //   - Authenticates with CRON_SECRET
 //   - Looks up the given conversation ids
-//   - Runs them through analyzeConversationSync (overwrites summary, inserts
-//     a fresh analysis_runs row — same write path as the cron)
+//   - Runs them through analyzeBatchSequential (gpt-4o, 15s spacing to fit
+//     the 30k TPM cap; overwrites summary, inserts a fresh analysis_runs row
+//     — same write path as the cron)
 //
-// Capped at 10 ids per call to bound cost and runtime; matches the sync
-// catch-up endpoint's MAX_LIMIT.
+// Capped at 10 ids per call: 10 × ~15s ≈ 135s, well under the 300s timeout.
 export const maxDuration = 300;
 
 const MAX_IDS = 10;
@@ -53,20 +53,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ requested: ids.length, analyzed: 0, failed: 0, missing, results: [] });
   }
 
-  const settled = await Promise.allSettled(
-    conversations.map((conv) => analyzeConversationSync(conv, prompt, apiKey)),
-  );
-
-  const results: SyncAnalysisResult[] = settled.map((s, i) =>
-    s.status === 'fulfilled'
-      ? s.value
-      : {
-          conversation_id: conversations[i]?.id ?? 'unknown',
-          intercom_id: conversations[i]?.intercom_id ?? null,
-          status: 'failed' as const,
-          error: s.reason instanceof Error ? s.reason.message : String(s.reason),
-        },
-  );
+  const results = await analyzeBatchSequential(conversations, prompt, apiKey);
 
   const analyzed = results.filter((r) => r.status === 'analyzed').length;
   const failed = results.filter((r) => r.status === 'failed').length;

@@ -11,31 +11,26 @@ import {
 import type { BatchJob, BatchJobStatus, AnalysisRun } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 import { ANALYSIS_MIN_DATE_ISO } from '@/lib/analyticsFilters';
-import { analyzeConversationSync } from '@/lib/analyze-sync';
+import { analyzeBatchSequential } from '@/lib/analyze-sync';
 import { maybeCreateAsanaTicketForConversation } from '@/lib/asana';
 
 // Allow up to 5 minutes on Vercel Pro
 export const maxDuration = 300;
 
 // ── Sync-analysis sizing ───────────────────────────────────────────────────
-// Each cron tick analyzes up to MAX_PER_TICK April-27+ conversations using
-// synchronous /v1/chat/completions calls (see lib/analyze-sync.ts). We process
-// in PARALLEL_CHUNK-size waves to spread tokens against gpt-5-mini's per-min
-// cap and to keep memory bounded. With CHUNK_DELAY_MS between waves the cron
-// stays well under the 300s Vercel function timeout.
+// Each cron tick analyzes up to MAX_PER_TICK April-27+ conversations through
+// analyzeBatchSequential, which paces calls 15s apart to fit gpt-4o's 30k TPM
+// cap on tier-1 OpenAI accounts (~10k tokens/call → ~3 calls/min sustained).
+// Each call also self-retries once on 429 inside analyzeConversationSync.
 //
-// Capacity = MAX_PER_TICK × 24 ticks/day = 960 chats/day, comfortably above
-// the 600–1000 daily volume target. If volume grows, raise MAX_PER_TICK and
-// re-tune the chunking math.
-const MAX_PER_TICK = 40;
-const PARALLEL_CHUNK = 10;
-const CHUNK_DELAY_MS = 5_000;
+// Per-tick budget: 16 calls × ~15s spacing ≈ 240s, comfortably under the 300s
+// Vercel function timeout. Cron schedule is */15 (96 ticks/day, see
+// vercel.json), so capacity = 16 × 96 = 1536 chats/day — well above the
+// 600–1000 daily volume target. If volume grows, raise MAX_PER_TICK only as
+// far as fits in 300s; further headroom requires an OpenAI tier upgrade.
+const MAX_PER_TICK = 16;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function sleep(ms: number) {
-  return new Promise<void>((res) => setTimeout(res, ms));
-}
 
 function mapOpenAIStatus(s: string): BatchJobStatus {
   const map: Record<string, BatchJobStatus> = {
@@ -229,20 +224,10 @@ export async function GET(req: NextRequest) {
       if (conversations.length === 0) {
         console.log('[cron] analyze-daily step B: no unanalyzed conversations');
       } else {
-        for (let i = 0; i < conversations.length; i += PARALLEL_CHUNK) {
-          const wave = conversations.slice(i, i + PARALLEL_CHUNK);
-          const settled = await Promise.allSettled(
-            wave.map((conv) => analyzeConversationSync(conv, prompt, openAIKey)),
-          );
-          for (const r of settled) {
-            if (r.status === 'fulfilled' && r.value.status === 'analyzed') syncAnalyzed++;
-            else syncFailed++;
-          }
-          // Pause between waves to spread tokens against the per-min rate cap
-          // (don't sleep after the last wave — pointless before returning).
-          if (i + PARALLEL_CHUNK < conversations.length) {
-            await sleep(CHUNK_DELAY_MS);
-          }
+        const results = await analyzeBatchSequential(conversations, prompt, openAIKey);
+        for (const r of results) {
+          if (r.status === 'analyzed') syncAnalyzed++;
+          else syncFailed++;
         }
       }
     }
