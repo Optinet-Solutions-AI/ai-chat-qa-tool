@@ -844,6 +844,42 @@ export async function dbGetConversationsByIds(ids: string[]): Promise<MinimalCon
   return (data ?? []) as MinimalConversation[];
 }
 
+// Fetches conversations whose summary text contains a literal substring AND
+// whose last analysis predates a cutoff. Used to re-run a specific issue
+// label (e.g. "Slow response times") through a newer/better model without
+// re-analyzing conversations that were already updated post-cutoff.
+export async function dbGetConversationsByIssueBeforeCutoff(
+  issueSubstring: string,
+  cutoffISO: string,
+  limit: number,
+): Promise<MinimalConversation[]> {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
+    .ilike('summary', `%${issueSubstring}%`)
+    .lt('analyzed_at', cutoffISO)
+    .order('analyzed_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`[db] get conversations by issue: ${error.message}`);
+  return (data ?? []) as MinimalConversation[];
+}
+
+// Counts conversations matching the same predicate as
+// dbGetConversationsByIssueBeforeCutoff. Used to surface a "remaining" number
+// to the admin loop so it knows when to stop.
+export async function dbCountConversationsByIssueBeforeCutoff(
+  issueSubstring: string,
+  cutoffISO: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('conversations')
+    .select('id', { count: 'exact', head: true })
+    .ilike('summary', `%${issueSubstring}%`)
+    .lt('analyzed_at', cutoffISO);
+  if (error) throw new Error(`[db] count conversations by issue: ${error.message}`);
+  return count ?? 0;
+}
+
 // Writes only the AI analysis fields — does NOT overwrite Intercom metadata
 export async function dbUpdateAnalysisFields(
   id: string,
