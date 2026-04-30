@@ -831,6 +831,19 @@ export async function getUnanalyzedConversationsPage(
   return (data ?? []) as MinimalConversation[];
 }
 
+// Fetches conversations by primary key, regardless of whether they're already
+// analyzed. Used by the force-reanalyze admin endpoint to re-run specific
+// conversations after a model/prompt change.
+export async function dbGetConversationsByIds(ids: string[]): Promise<MinimalConversation[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
+    .in('id', ids);
+  if (error) throw new Error(`[db] get conversations by ids: ${error.message}`);
+  return (data ?? []) as MinimalConversation[];
+}
+
 // Writes only the AI analysis fields — does NOT overwrite Intercom metadata
 export async function dbUpdateAnalysisFields(
   id: string,
