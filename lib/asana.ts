@@ -716,7 +716,17 @@ function buildTaskName(input: AsanaTaskInput): string {
 }
 
 function buildTaskNotes(input: AsanaTaskInput): string {
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
+  // Prefer NEXT_PUBLIC_APP_URL when explicitly configured; otherwise fall back
+  // to Vercel-provided env vars so the back-link still renders on deployments
+  // where the public URL var was never set (production uses
+  // VERCEL_PROJECT_PRODUCTION_URL, preview deploys fall through to VERCEL_URL).
+  const vercelProd = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const vercelDeploy = process.env.VERCEL_URL;
+  const appUrl = (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (vercelProd ? `https://${vercelProd}` : '') ||
+    (vercelDeploy ? `https://${vercelDeploy}` : '')
+  ).replace(/\/$/, '');
   const intercomAppId = process.env.NEXT_PUBLIC_INTERCOM_APP_ID ?? '';
   const SPACER = '———-';
 
