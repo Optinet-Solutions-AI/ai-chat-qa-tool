@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { useStore } from '@/lib/store';
+import ThemeToggle from './ThemeToggle';
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -63,6 +64,8 @@ export default function Header({ onMenuToggle, onAddConversation }: HeaderProps)
             <span className="hidden sm:inline">Add Conversation</span>
           </button>
         )}
+
+        <ThemeToggle />
 
         {/* User avatar */}
         <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold uppercase">

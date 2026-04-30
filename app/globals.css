@@ -10,3 +10,50 @@
     font-size: 12px;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Dark mode shim — activated by `class="dark"` on <html>.
+   Overrides surface/text/border utility classes without touching
+   any component code. Sidebar already uses dark styling (#0d1117)
+   and intentionally is not re-themed here.
+   ────────────────────────────────────────────────────────────────── */
+html.dark body {
+  color: #e2e8f0;
+  background-color: #0b0f17;
+}
+
+/* Page-level backgrounds (RootShell + body inline hex) */
+html.dark .bg-\[\#f4f6f9\],
+html.dark .bg-\[\#f6f7fb\] {
+  background-color: #0b0f17 !important;
+}
+
+/* Surfaces */
+html.dark .bg-white { background-color: #161b26 !important; }
+html.dark .bg-slate-50,
+html.dark .bg-gray-50 { background-color: #1a2030 !important; }
+html.dark .bg-slate-100,
+html.dark .bg-gray-100 { background-color: #1f2738 !important; }
+html.dark .bg-slate-200 { background-color: #252d40 !important; }
+
+/* Text */
+html.dark .text-slate-900,
+html.dark .text-gray-900 { color: #e2e8f0 !important; }
+html.dark .text-slate-800 { color: #cbd5e1 !important; }
+html.dark .text-slate-700 { color: #b6c0d2 !important; }
+html.dark .text-slate-600 { color: #94a3b8 !important; }
+html.dark .text-slate-500 { color: #8593a8 !important; }
+html.dark .text-slate-400 { color: #6b7892 !important; }
+
+/* Borders */
+html.dark .border-slate-200 { border-color: #2d3548 !important; }
+html.dark .border-slate-200\/80 { border-color: rgba(45, 53, 72, 0.8) !important; }
+html.dark .border-slate-300 { border-color: #38415a !important; }
+html.dark .border-slate-100 { border-color: #232b3d !important; }
+html.dark .border-gray-200 { border-color: #2d3548 !important; }
+
+/* Hover states */
+html.dark .hover\:bg-slate-50:hover { background-color: #1a2030 !important; }
+html.dark .hover\:bg-slate-100:hover { background-color: #1f2738 !important; }
+html.dark .hover\:bg-gray-50:hover { background-color: #1a2030 !important; }
+html.dark .hover\:bg-gray-100:hover { background-color: #1f2738 !important; }
