@@ -4,12 +4,13 @@
 // and swallowed so a flaky Asana API never breaks the analysis pipeline.
 //
 // Routing: each ticket lands in the project section (board column) whose name
-// matches the conversation's agent_name. Matching is case-insensitive exact
-// first, then first-word (so "Becka VIP" still matches a column named "Becka").
-// If no column matches, a new column named after the agent is auto-created
-// and the ticket lands there. If creation itself fails (rate limit, perms),
-// ASANA_SECTION_GID is used as a last-resort fallback; otherwise the ticket
-// goes to the project default.
+// matches the conversation's account_manager. Matching is case-insensitive
+// exact first, then first-word (so "Ada VIP" still matches a column named
+// "Ada"). If no column matches, a new column named after the AM is auto-
+// created and the ticket lands there. If creation itself fails (rate limit,
+// perms), ASANA_SECTION_GID is used as a last-resort fallback; otherwise the
+// ticket goes to the project default. The agent's name is still recorded in
+// the task notes but does not get its own column.
 //
 // Required env:
 //   ASANA_ACCESS_TOKEN           Service-account Personal Access Token
@@ -22,14 +23,32 @@
 //                                the field is created in Asana — without it,
 //                                tickets are still created but without the AM
 //                                tag (board view falls back to agent column only).
+//
+// Project custom fields discovered by name (no env var needed):
+//   "Case Status"  — set to "Pending Action" on every new ticket. Other
+//                    options ("Resolved", "No Action Needed") are managed
+//                    manually inside Asana. Missing options are NOT auto-
+//                    created so this stays a fixed three-state field.
+//   "Severity"     — set to "Severity 1/2/3" based on the AI severity level.
+//                    Missing options are NOT auto-created.
+//   "Category"     — set to the first result.category from the AI summary.
+//                    Missing options ARE auto-created since AI labels drift.
+//   "Issue"        — set to the first result.item from the AI summary. Same
+//                    auto-create behaviour as Category.
+// If a field doesn't exist on the project it is silently skipped — the
+// ticket is still created, just without that tag.
 //   ASANA_AM_USER_MAP            JSON map of AM display name → Asana user GID,
 //                                e.g. {"Ada":"1199...","Christian":"1199..."}.
-//                                When the ticket's AM matches a key, the task
-//                                is assigned to that user so they get a real
-//                                Asana notification. Names are matched case-
-//                                insensitively. Unmapped AMs leave assignee
-//                                unset (no ping; ticket still routes by column
-//                                + custom field).
+//                                Used as an explicit override — wins over
+//                                workspace auto-discovery. Useful for joint
+//                                AMs ("Geri/Nik") and display-name mismatches.
+//                                Unmapped AMs fall through to the workspace
+//                                user lookup below.
+//   ASANA_WORKSPACE_GID          Optional. The workspace whose user list is
+//                                searched to auto-resolve an AM by name when
+//                                ASANA_AM_USER_MAP doesn't cover them. If
+//                                unset we derive it from the configured
+//                                project's workspace.gid.
 //   NEXT_PUBLIC_APP_URL          Base URL used for the QA-tool back-link
 //   NEXT_PUBLIC_INTERCOM_APP_ID  Used for the Intercom inbox back-link
 //
@@ -49,16 +68,18 @@
 // re-analysis of that conversation will NOT silently re-create the ticket
 // the user deleted on purpose.
 
+import { cleanPlayerName, getVipLevel, getBacklinkFull } from '@/lib/utils';
+
 const ASANA_API = 'https://app.asana.com/api/1.0';
 
 // In-memory cache of the project's section list — lowercased section name → gid.
-// Refreshed every SECTIONS_TTL_MS so newly-added agent columns get picked up
+// Refreshed every SECTIONS_TTL_MS so newly-added AM columns get picked up
 // without a redeploy. Stale on cold start (serverless), which is fine.
 const SECTIONS_TTL_MS = 10 * 60 * 1000;
 let sectionsCache: { fetchedAt: number; map: Map<string, string> } | null = null;
 
-// In-flight section creation promises keyed by lowercased agent name.
-// Prevents two concurrent severity-3 analyses for the same new agent from
+// In-flight section creation promises keyed by lowercased AM name.
+// Prevents two concurrent severity-3 analyses for the same new AM from
 // racing and creating two duplicate columns within the same invocation.
 const sectionCreatesInFlight = new Map<string, Promise<string | null>>();
 
@@ -67,6 +88,30 @@ const sectionCreatesInFlight = new Map<string, Promise<string | null>>();
 const AM_OPTIONS_TTL_MS = 10 * 60 * 1000;
 let amOptionsCache: { fetchedAt: number; map: Map<string, string> } | null = null;
 const amOptionCreatesInFlight = new Map<string, Promise<string | null>>();
+
+// Project-level custom-field discovery. Lets us look up "Case Status",
+// "Severity", "Category", "Issue" by their human name in the Asana project
+// instead of demanding a separate ASANA_*_FIELD_GID env var per field. Field
+// names are matched case-insensitively. Cached with the same TTL as sections.
+const FIELDS_TTL_MS = 10 * 60 * 1000;
+let projectFieldsCache: { fetchedAt: number; map: Map<string, string> } | null = null;
+
+// Per-field enum option caches (separate from the AM cache so each field has
+// its own option namespace). Keyed by field gid → lowercased option name → option gid.
+const ENUM_OPTIONS_TTL_MS = 10 * 60 * 1000;
+const enumOptionsCache = new Map<string, { fetchedAt: number; map: Map<string, string> }>();
+// In-flight option creates keyed by `${fieldGid}::${nameLower}` so two parallel
+// invocations don't race to create the same option twice.
+const enumOptionCreatesInFlight = new Map<string, Promise<string | null>>();
+
+// Workspace-level user discovery for assignee routing. Lets us look up an AM
+// by name in the Asana workspace instead of requiring every AM be present in
+// ASANA_AM_USER_MAP. The env-var map still wins when set — useful for edge
+// cases (display name ≠ Asana user name, joint AMs like "Geri/Nik").
+const WORKSPACE_TTL_MS = 60 * 60 * 1000;
+let workspaceGidCache: { fetchedAt: number; gid: string | null } | null = null;
+const WORKSPACE_USERS_TTL_MS = 30 * 60 * 1000;
+let workspaceUsersCache: { fetchedAt: number; map: Map<string, string> } | null = null;
 
 export function isAsanaConfigured(): boolean {
   return !!(process.env.ASANA_ACCESS_TOKEN && process.env.ASANA_PROJECT_GID);
@@ -116,6 +161,122 @@ function resolveAmAssignee(amName: string | null): string | null {
   return map.get(amName.trim().toLowerCase()) ?? null;
 }
 
+// Derives the workspace GID from the configured project so we don't need a
+// separate ASANA_WORKSPACE_GID env var. Cached for an hour — workspaces
+// don't move. Optional env override is honoured for self-hosted edge cases.
+async function getWorkspaceGid(): Promise<string | null> {
+  if (workspaceGidCache && Date.now() - workspaceGidCache.fetchedAt < WORKSPACE_TTL_MS) {
+    return workspaceGidCache.gid;
+  }
+  const fromEnv = process.env.ASANA_WORKSPACE_GID;
+  if (fromEnv) {
+    workspaceGidCache = { fetchedAt: Date.now(), gid: fromEnv };
+    return fromEnv;
+  }
+  if (!isAsanaConfigured()) return null;
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+  const projectGid = process.env.ASANA_PROJECT_GID!;
+  try {
+    const res = await fetch(`${ASANA_API}/projects/${projectGid}?opt_fields=workspace.gid`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[asana] get project workspace failed (${res.status}): ${body.slice(0, 300)}`);
+      return workspaceGidCache?.gid ?? null;
+    }
+    const json = await res.json();
+    const gid: string | null = json?.data?.workspace?.gid ?? null;
+    workspaceGidCache = { fetchedAt: Date.now(), gid };
+    return gid;
+  } catch (e) {
+    console.error('[asana] get project workspace exception:', (e as Error).message);
+    return workspaceGidCache?.gid ?? null;
+  }
+}
+
+// Lists every user in the workspace and returns a lowercased-name → user gid
+// map. Pages through Asana's offset cursor (100/page). Used by the assignee
+// resolver below so an AM can be matched without ASANA_AM_USER_MAP.
+async function getWorkspaceUsersByName(): Promise<Map<string, string>> {
+  if (workspaceUsersCache && Date.now() - workspaceUsersCache.fetchedAt < WORKSPACE_USERS_TTL_MS) {
+    return workspaceUsersCache.map;
+  }
+  const workspaceGid = await getWorkspaceGid();
+  if (!workspaceGid) return workspaceUsersCache?.map ?? new Map();
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+
+  const map = new Map<string, string>();
+  let offset: string | null = null;
+  // Hard-cap pagination so a misbehaving cursor can't loop forever.
+  for (let page = 0; page < 50; page++) {
+    const params = new URLSearchParams({
+      workspace: workspaceGid,
+      limit: '100',
+      opt_fields: 'gid,name',
+    });
+    if (offset) params.set('offset', offset);
+    try {
+      const res = await fetch(`${ASANA_API}/users?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        console.error(`[asana] list workspace users failed (${res.status}): ${body.slice(0, 300)}`);
+        return workspaceUsersCache?.map ?? new Map();
+      }
+      const json = await res.json();
+      for (const u of (json?.data ?? []) as Array<{ gid?: string; name?: string }>) {
+        if (u?.gid && typeof u?.name === 'string') {
+          map.set(u.name.trim().toLowerCase(), u.gid);
+        }
+      }
+      offset = json?.next_page?.offset ?? null;
+      if (!offset) break;
+    } catch (e) {
+      console.error('[asana] list workspace users exception:', (e as Error).message);
+      return workspaceUsersCache?.map ?? new Map();
+    }
+  }
+  workspaceUsersCache = { fetchedAt: Date.now(), map };
+  return map;
+}
+
+// Resolves the Asana user GID to assign a ticket to, given an AM display
+// name. Resolution order:
+//   1. ASANA_AM_USER_MAP env override (explicit, highest priority).
+//   2. Exact name match in the workspace user list.
+//   3. First-token match: AM "Christian" matches user "Christian Surname";
+//      AM "Geri/Nik" tries "Geri", then "Nik". This catches the common case
+//      where the AM display name is just a first name but the Asana user
+//      record has the full name.
+// Returns null when nothing matches — the ticket is created unassigned
+// rather than being rejected.
+async function resolveAssigneeForAm(amName: string | null): Promise<string | null> {
+  if (!amName) return null;
+
+  const fromEnv = resolveAmAssignee(amName);
+  if (fromEnv) return fromEnv;
+
+  const users = await getWorkspaceUsersByName();
+  if (users.size === 0) return null;
+
+  const normalized = amName.trim().toLowerCase();
+  const exact = users.get(normalized);
+  if (exact) return exact;
+
+  // AM display name might be a first name only or a joint AM like "Geri/Nik".
+  // Split on whitespace + slash and try each token against user first names.
+  const tokens = normalized.split(/[\s/]+/).filter(Boolean);
+  for (const token of tokens) {
+    for (const [userName, userGid] of users) {
+      if (userName === token) return userGid;
+      if (userName.split(/\s+/)[0] === token) return userGid;
+    }
+  }
+  return null;
+}
+
 async function getProjectSections(): Promise<Map<string, string>> {
   if (sectionsCache && Date.now() - sectionsCache.fetchedAt < SECTIONS_TTL_MS) {
     return sectionsCache.map;
@@ -150,14 +311,14 @@ async function getProjectSections(): Promise<Map<string, string>> {
   }
 }
 
-// Resolves an agent name to a section gid using exact-match then first-word.
+// Resolves an AM name to a section gid using exact-match then first-word.
 // Returns null when no column matches — the caller decides the fallback.
-async function resolveSectionForAgent(agentName: string | null): Promise<string | null> {
-  if (!agentName) return null;
+async function resolveSectionForAccountManager(amName: string | null): Promise<string | null> {
+  if (!amName) return null;
   const sections = await getProjectSections();
   if (sections.size === 0) return null;
 
-  const normalized = agentName.trim().toLowerCase();
+  const normalized = amName.trim().toLowerCase();
   const exact = sections.get(normalized);
   if (exact) return exact;
 
@@ -169,16 +330,16 @@ async function resolveSectionForAgent(agentName: string | null): Promise<string 
   return null;
 }
 
-// Resolves an agent's section gid; creates the section if it doesn't exist.
+// Resolves an AM's section gid; creates the section if it doesn't exist.
 // Refreshes the cache once on miss to catch sections created by another
 // invocation, then deduplicates concurrent creates within this invocation
-// via sectionCreatesInFlight so we don't make two columns named "Allen".
-async function ensureSectionForAgent(agentName: string | null): Promise<string | null> {
-  if (!agentName) return null;
-  const trimmed = agentName.trim();
+// via sectionCreatesInFlight so we don't make two columns named "Ada".
+async function ensureSectionForAccountManager(amName: string | null): Promise<string | null> {
+  if (!amName) return null;
+  const trimmed = amName.trim();
   if (!trimmed) return null;
 
-  const existing = await resolveSectionForAgent(trimmed);
+  const existing = await resolveSectionForAccountManager(trimmed);
   if (existing) return existing;
 
   const key = trimmed.toLowerCase();
@@ -187,11 +348,11 @@ async function ensureSectionForAgent(agentName: string | null): Promise<string |
 
   const promise = (async () => {
     // Force a cache refresh in case a parallel cron tick or another serverless
-    // instance just created this section for the same agent.
+    // instance just created this section for the same AM.
     sectionsCache = null;
-    const afterRefresh = await resolveSectionForAgent(trimmed);
+    const afterRefresh = await resolveSectionForAccountManager(trimmed);
     if (afterRefresh) return afterRefresh;
-    return createSectionForAgent(trimmed);
+    return createSectionForAccountManager(trimmed);
   })().finally(() => {
     sectionCreatesInFlight.delete(key);
   });
@@ -312,7 +473,172 @@ async function createAmEnumOption(name: string): Promise<string | null> {
   }
 }
 
-async function createSectionForAgent(name: string): Promise<string | null> {
+// ── Project custom-field discovery (for Case Status / Severity / Category /
+// Issue) ──────────────────────────────────────────────────────────────────
+// Lists the custom fields attached to ASANA_PROJECT_GID and returns a
+// lowercased-name → field gid map. Cached for FIELDS_TTL_MS so we don't hit
+// the API on every create.
+async function getProjectFieldsByName(): Promise<Map<string, string>> {
+  if (projectFieldsCache && Date.now() - projectFieldsCache.fetchedAt < FIELDS_TTL_MS) {
+    return projectFieldsCache.map;
+  }
+  if (!isAsanaConfigured()) return new Map();
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+  const projectGid = process.env.ASANA_PROJECT_GID!;
+
+  try {
+    const res = await fetch(
+      `${ASANA_API}/projects/${projectGid}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[asana] list custom fields failed (${res.status}): ${body.slice(0, 300)}`);
+      return projectFieldsCache?.map ?? new Map();
+    }
+    const json = await res.json();
+    const map = new Map<string, string>();
+    for (const s of (json?.data ?? []) as Array<{
+      custom_field?: { gid?: string; name?: string };
+    }>) {
+      const cf = s?.custom_field;
+      if (cf?.gid && typeof cf?.name === 'string') {
+        map.set(cf.name.trim().toLowerCase(), cf.gid);
+      }
+    }
+    projectFieldsCache = { fetchedAt: Date.now(), map };
+    return map;
+  } catch (e) {
+    console.error('[asana] list custom fields exception:', (e as Error).message);
+    return projectFieldsCache?.map ?? new Map();
+  }
+}
+
+async function getEnumOptionsForField(fieldGid: string): Promise<Map<string, string>> {
+  const cached = enumOptionsCache.get(fieldGid);
+  if (cached && Date.now() - cached.fetchedAt < ENUM_OPTIONS_TTL_MS) {
+    return cached.map;
+  }
+  if (!isAsanaConfigured()) return new Map();
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+  try {
+    const res = await fetch(
+      `${ASANA_API}/custom_fields/${fieldGid}?opt_fields=enum_options.gid,enum_options.name,resource_subtype`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[asana] get enum options for ${fieldGid} failed (${res.status}): ${body.slice(0, 300)}`);
+      return cached?.map ?? new Map();
+    }
+    const json = await res.json();
+    const subtype: string | undefined = json?.data?.resource_subtype;
+    if (subtype && subtype !== 'enum') {
+      // Cache empty so we don't keep hitting the API for non-enum fields.
+      enumOptionsCache.set(fieldGid, { fetchedAt: Date.now(), map: new Map() });
+      return new Map();
+    }
+    const map = new Map<string, string>();
+    for (const o of (json?.data?.enum_options ?? []) as Array<{ gid?: string; name?: string }>) {
+      if (o?.gid && typeof o?.name === 'string') {
+        map.set(o.name.trim().toLowerCase(), o.gid);
+      }
+    }
+    enumOptionsCache.set(fieldGid, { fetchedAt: Date.now(), map });
+    return map;
+  } catch (e) {
+    console.error('[asana] get enum options exception:', (e as Error).message);
+    return cached?.map ?? new Map();
+  }
+}
+
+// Resolves an enum option for a project field discovered by name. When
+// `autoCreate` is true and the option doesn't exist, a new one is created
+// (used for Category/Issue where AI-produced labels can drift). For fixed
+// option sets like Case Status and Severity pass `autoCreate=false` so a
+// missing option silently skips the field rather than polluting the project.
+async function resolveProjectEnum(
+  fieldName: string,
+  optionName: string | null,
+  autoCreate: boolean,
+): Promise<{ fieldGid: string; optionGid: string } | null> {
+  if (!optionName) return null;
+  const trimmedOption = optionName.trim();
+  if (!trimmedOption) return null;
+
+  const fields = await getProjectFieldsByName();
+  const fieldGid = fields.get(fieldName.trim().toLowerCase());
+  if (!fieldGid) return null;
+
+  const optKey = trimmedOption.toLowerCase();
+  const options = await getEnumOptionsForField(fieldGid);
+  const existing = options.get(optKey);
+  if (existing) return { fieldGid, optionGid: existing };
+
+  if (!autoCreate) return null;
+
+  const inFlightKey = `${fieldGid}::${optKey}`;
+  const inFlight = enumOptionCreatesInFlight.get(inFlightKey);
+  if (inFlight) {
+    const optionGid = await inFlight;
+    return optionGid ? { fieldGid, optionGid } : null;
+  }
+
+  const promise = (async () => {
+    // Refresh cache once on miss in case another invocation just created it.
+    enumOptionsCache.delete(fieldGid);
+    const refreshed = await getEnumOptionsForField(fieldGid);
+    const found = refreshed.get(optKey);
+    if (found) return found;
+    return createEnumOptionForField(fieldGid, trimmedOption);
+  })().finally(() => {
+    enumOptionCreatesInFlight.delete(inFlightKey);
+  });
+  enumOptionCreatesInFlight.set(inFlightKey, promise);
+
+  const optionGid = await promise;
+  return optionGid ? { fieldGid, optionGid } : null;
+}
+
+async function createEnumOptionForField(fieldGid: string, name: string): Promise<string | null> {
+  if (!isAsanaConfigured()) return null;
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+  try {
+    const res = await fetch(`${ASANA_API}/custom_fields/${fieldGid}/enum_options`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ data: { name } }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[asana] create enum option "${name}" on ${fieldGid} failed (${res.status}): ${body.slice(0, 300)}`);
+      return null;
+    }
+    const json = await res.json();
+    const gid: string | undefined = json?.data?.gid;
+    if (!gid) return null;
+    const cached = enumOptionsCache.get(fieldGid);
+    if (cached) {
+      cached.map.set(name.toLowerCase(), gid);
+    } else {
+      enumOptionsCache.set(fieldGid, {
+        fetchedAt: Date.now(),
+        map: new Map([[name.toLowerCase(), gid]]),
+      });
+    }
+    console.log(`[asana] auto-created enum option "${name}" on field ${fieldGid} (gid=${gid})`);
+    return gid;
+  } catch (e) {
+    console.error('[asana] create enum option exception:', (e as Error).message);
+    return null;
+  }
+}
+
+async function createSectionForAccountManager(name: string): Promise<string | null> {
   if (!isAsanaConfigured()) return null;
   const token = process.env.ASANA_ACCESS_TOKEN!;
   const projectGid = process.env.ASANA_PROJECT_GID!;
@@ -362,52 +688,55 @@ export interface AsanaTaskInput {
   // either agent (column) or AM (field) inside one project.
   accountManager: string | null;
   brand: string | null;
-  severity: string;             // e.g. "Level 3"
+  vipLevel: string | null;       // e.g. "L7"
+  language: string | null;
+  country: string | null;
+  backlinkFull: string | null;   // BACKEND account link from custom attributes
+  severity: string;              // e.g. "Level 3"
   resolutionStatus: string | null;
-  issueCategories: string[];    // collected from results[]
-  summaryText: string;          // raw AI JSON / rendered summary
+  issueCategories: string[];     // collected from results[].category
+  issueItems: string[];          // collected from results[].item
+  summaryText: string;           // raw AI JSON / rendered summary
 }
 
 function buildTaskName(input: AsanaTaskInput): string {
-  const who = input.playerName ?? 'Unknown player';
-  const brand = input.brand ? ` · ${input.brand}` : '';
+  // Strip the casino slug Intercom appends to contact names (e.g. "Jan _spinjo")
+  // so the task title matches the dashboard's player column.
+  const who = cleanPlayerName(input.playerName) ?? 'Unknown player';
   const cat = input.issueCategories[0] ? ` — ${input.issueCategories[0]}` : '';
-  const sevDigit = input.severity.match(/\d/)?.[0] ?? '?';
   // Asana caps task names at 1024 chars but anything past ~250 wraps badly in
   // list views — trim defensively.
-  return `[Sev ${sevDigit}] ${who}${brand}${cat}`.slice(0, 250);
+  return `${who}${cat}`.slice(0, 250);
 }
 
 function buildTaskNotes(input: AsanaTaskInput): string {
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
   const intercomAppId = process.env.NEXT_PUBLIC_INTERCOM_APP_ID ?? '';
+  const SPACER = '———-';
+
+  const customerName = cleanPlayerName(input.playerName) ?? 'Unknown';
 
   const lines: string[] = [];
-  lines.push(`Severity: ${input.severity}`);
-  if (input.resolutionStatus) lines.push(`Resolution: ${input.resolutionStatus}`);
-  if (input.issueCategories.length > 0) {
-    lines.push(`Categories: ${input.issueCategories.join(', ')}`);
-  }
-  lines.push('');
-  lines.push(
-    `Agent: ${input.agentName ?? 'Unknown'}${input.agentEmail ? ` <${input.agentEmail}>` : ''}`,
-  );
-  lines.push(
-    `Player: ${input.playerName ?? 'Unknown'}${input.playerEmail ? ` <${input.playerEmail}>` : ''}`,
-  );
-  if (input.brand) lines.push(`Brand: ${input.brand}`);
-  if (input.accountManager) lines.push(`Account Manager: ${input.accountManager}`);
-  lines.push('');
-  if (appUrl) {
-    lines.push(`QA Tool: ${appUrl}/conversations/${input.conversationId}`);
-  }
-  if (input.intercomId && intercomAppId) {
-    lines.push(
-      `Intercom: https://app.intercom.com/a/apps/${intercomAppId}/conversations/${input.intercomId}`,
-    );
-  }
-  lines.push('');
-  lines.push('--- AI Analysis ---');
+  // Identity block
+  lines.push(`Customer Name: ${customerName}`);
+  lines.push(`VIP Level: ${input.vipLevel ?? 'Unknown'}`);
+  lines.push(`Language: ${input.language ?? 'Unknown'}`);
+  lines.push(`Country: ${input.country ?? 'Unknown'}`);
+  lines.push(`Brand: ${input.brand ?? 'Unknown'}`);
+  lines.push(`Agent: ${input.agentName ?? 'Unknown'}`);
+  lines.push(SPACER);
+
+  // Links block
+  const intercomLink = input.intercomId && intercomAppId
+    ? `https://app.intercom.com/a/apps/${intercomAppId}/conversations/${input.intercomId}`
+    : null;
+  lines.push(`Link to Chat: ${intercomLink ?? '—'}`);
+  lines.push(`Link to BACKEND Account: ${input.backlinkFull ?? '—'}`);
+  const toolLink = appUrl ? `${appUrl}/conversations/${input.conversationId}` : null;
+  lines.push(`Link to Conversation in the Tool: ${toolLink ?? '—'}`);
+  lines.push(SPACER);
+
+  lines.push('AI Conversation Summary:');
   lines.push(input.summaryText);
   return lines.join('\n');
 }
@@ -490,10 +819,14 @@ export async function maybeCreateAsanaTicketForConversation(
     if (!ctx || ctx.asana_task_gid) return null;
 
     const issueCategories: string[] = [];
-    const seen = new Set<string>();
+    const issueItems: string[] = [];
+    const seenCat = new Set<string>();
+    const seenItem = new Set<string>();
     for (const r of parsed.results ?? []) {
       const c = String(r.category ?? '').trim();
-      if (c && !seen.has(c)) { seen.add(c); issueCategories.push(c); }
+      if (c && !seenCat.has(c)) { seenCat.add(c); issueCategories.push(c); }
+      const it = String(r.item ?? '').trim();
+      if (it && !seenItem.has(it)) { seenItem.add(it); issueItems.push(it); }
     }
 
     const gid = await createAsanaTaskForConversation({
@@ -505,9 +838,14 @@ export async function maybeCreateAsanaTicketForConversation(
       agentEmail: ctx.agent_email,
       accountManager: ctx.account_manager,
       brand: ctx.brand,
+      vipLevel: getVipLevel(ctx),
+      language: ctx.language,
+      country: ctx.player_country,
+      backlinkFull: getBacklinkFull(ctx),
       severity: 'Level 3',
       resolutionStatus: parsed.resolution_status,
       issueCategories,
+      issueItems,
       summaryText,
     });
     if (gid) await dbUpdateAsanaTaskGid(conversationId, gid);
@@ -526,16 +864,17 @@ export async function createAsanaTaskForConversation(
   const token = process.env.ASANA_ACCESS_TOKEN!;
   const projectGid = process.env.ASANA_PROJECT_GID!;
 
-  // Per-ticket routing: find or auto-create the column matching the agent.
+  // Per-ticket routing: find or auto-create the column matching the AM.
   // ASANA_SECTION_GID is only used as a last-resort fallback when ensure
-  // fails (rate limit / perms / no agent name).
-  const ensuredSection = await ensureSectionForAgent(input.agentName);
+  // fails (rate limit / perms / no AM name).
+  const ensuredSection = await ensureSectionForAccountManager(input.accountManager);
   const sectionGid = ensuredSection ?? process.env.ASANA_SECTION_GID ?? null;
-  if (!ensuredSection && input.agentName) {
-    console.warn(`[asana] could not ensure section for agent: ${input.agentName}`);
+  if (!ensuredSection && input.accountManager) {
+    console.warn(`[asana] could not ensure section for account manager: ${input.accountManager}`);
   }
 
-  // AM custom-field option (separate axis from the agent column). Resolved
+  // AM custom-field option (kept as a redundant filter axis alongside the AM
+  // column so the same field can be used in other Asana views). Resolved
   // against the configured ASANA_AM_FIELD_GID; auto-creates a new option if
   // an unseen AM appears (e.g. a freshly added VIP_<name> group). Best-effort
   // — a null result just means the field is unconfigured or transiently
@@ -547,10 +886,31 @@ export async function createAsanaTaskForConversation(
     customFields[amFieldGid] = amOptionGid;
   }
 
-  // Assignee: looked up via ASANA_AM_USER_MAP. When an AM has a mapped Asana
-  // user GID, set it as assignee so they get a real "task assigned to you"
-  // notification. Unmapped AMs leave assignee unset — ticket is still created.
-  const assigneeGid = resolveAmAssignee(input.accountManager);
+  // Project-level enum fields discovered by name from the Asana project.
+  // Run in parallel — each lookup is cached so steady-state cost is one tiny
+  // map read per field. Case Status defaults to "Pending Action" on every new
+  // escalation; Severity is derived from the AI's level digit; Category /
+  // Issue come from the first result and auto-create options if the AI
+  // produces an unseen label (matches the AM auto-create behaviour).
+  const sevDigit = input.severity.match(/\d/)?.[0] ?? null;
+  const [caseStatusEnum, severityEnum, categoryEnum, issueEnum] = await Promise.all([
+    resolveProjectEnum('Case Status', 'Pending Action', false),
+    sevDigit ? resolveProjectEnum('Severity', `Severity ${sevDigit}`, false) : Promise.resolve(null),
+    resolveProjectEnum('Category', input.issueCategories[0] ?? null, true),
+    resolveProjectEnum('Issue', input.issueItems[0] ?? null, true),
+  ]);
+  for (const e of [caseStatusEnum, severityEnum, categoryEnum, issueEnum]) {
+    if (e) customFields[e.fieldGid] = e.optionGid;
+  }
+
+  // Assignee: ASANA_AM_USER_MAP wins when set (explicit override for joint
+  // AMs like "Geri/Nik" or display-name mismatches), otherwise we look the
+  // AM up by name in the workspace user list. Unresolvable AMs leave the
+  // ticket unassigned and log a warning — creation still succeeds.
+  const assigneeGid = await resolveAssigneeForAm(input.accountManager);
+  if (!assigneeGid && input.accountManager) {
+    console.warn(`[asana] could not resolve assignee for account manager: ${input.accountManager}`);
+  }
 
   const payload = {
     data: {

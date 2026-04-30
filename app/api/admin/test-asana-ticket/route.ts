@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { dbGetAsanaConversationContext, dbUpdateAsanaTaskGid } from '@/lib/db';
 import { createAsanaTaskForConversation, isAsanaConfigured } from '@/lib/asana';
 import { parseAnalysisSummary, normalizeSeverity } from '@/lib/analyticsFilters';
+import { getVipLevel, getBacklinkFull } from '@/lib/utils';
 
 // Forces creation of an Asana ticket for a single conversation regardless of
 // dissatisfaction severity. Used to verify the integration end-to-end without
@@ -118,8 +119,10 @@ export async function GET(req: NextRequest) {
   const parsed = parseAnalysisSummary(row.summary);
   const normalizedSev = normalizeSeverity(parsed.dissatisfaction_severity);
   const issueCategories: string[] = [];
+  const issueItems: string[] = [];
   for (const r of parsed.results ?? []) {
     if (r.category) issueCategories.push(String(r.category).trim());
+    if (r.item) issueItems.push(String(r.item).trim());
   }
 
   const gid = await createAsanaTaskForConversation({
@@ -131,9 +134,14 @@ export async function GET(req: NextRequest) {
     agentEmail: ctx.agent_email,
     accountManager: ctx.account_manager,
     brand: ctx.brand,
+    vipLevel: getVipLevel(ctx),
+    language: ctx.language,
+    country: ctx.player_country,
+    backlinkFull: getBacklinkFull(ctx),
     severity: normalizedSev ?? 'Test',
     resolutionStatus: parsed.resolution_status,
     issueCategories,
+    issueItems,
     summaryText: row.summary,
   });
 

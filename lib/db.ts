@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery, RawMessage } from './types';
+import type { Conversation, ConversationNote, PromptVersion, AnalysisRun, SyncJob, BatchJob, BatchJobStatus, AiQuery, RawMessage, PlayerCompany } from './types';
 import { cestDateToUnixRange } from './intercom';
 import {
   parseAnalysisSummary,
@@ -884,6 +884,16 @@ export interface AsanaConversationContext {
   brand: string | null;
   account_manager: string | null;
   asana_task_gid: string | null;
+  // Extra fields rendered into the Asana task description (VIP level,
+  // language, country, BACKEND link). Kept here so the Asana builder doesn't
+  // need a second round-trip to Supabase.
+  language: string | null;
+  player_country: string | null;
+  player_tags: string[];
+  player_segments: string[];
+  tags: string[];
+  player_companies: PlayerCompany[];
+  player_custom_attributes: Record<string, unknown> | null;
 }
 
 export async function dbGetAsanaConversationContext(
@@ -891,7 +901,9 @@ export async function dbGetAsanaConversationContext(
 ): Promise<AsanaConversationContext | null> {
   const { data, error } = await supabase
     .from('conversations')
-    .select('id, intercom_id, player_name, player_email, agent_name, agent_email, brand, account_manager, asana_task_gid')
+    .select(
+      'id, intercom_id, player_name, player_email, agent_name, agent_email, brand, account_manager, asana_task_gid, language, player_country, player_tags, player_segments, tags, player_companies, player_custom_attributes',
+    )
     .eq('id', id)
     .single();
   if (error || !data) return null;

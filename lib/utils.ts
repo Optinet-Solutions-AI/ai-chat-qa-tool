@@ -231,7 +231,7 @@ export function cleanPlayerName(name: string | null): string | null {
   return s.trim() || null;
 }
 
-export function getBacklinkFull(conv: Conversation): string | null {
+export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attributes'>): string | null {
   return getCustomAttr(
     conv.player_custom_attributes,
     'backlinkfull', 'backlink_full', 'backlinkFull', 'BacklinkFull', 'backlink',
