@@ -845,27 +845,27 @@ export async function dbGetConversationsByIds(ids: string[]): Promise<MinimalCon
 }
 
 // Fetches conversations whose AI-analysis JSON tags a specific issue label
-// (e.g. matches `"item":"Slow response times"` inside summary), whose last
-// analysis predates a cutoff, and whose Intercom creation date is on/after a
-// floor. Used to re-run a stale verdict through a newer model without
-// touching already-fixed rows or older data outside the dashboard's scope.
+// (matches `"item":"<label>"` or `"item":"<n>. <label>"` inside summary —
+// the model writes both forms), whose last analysis predates a cutoff, and
+// whose Intercom creation date is on/after a floor. Used to re-run a stale
+// verdict through a newer model without touching already-fixed rows or
+// older data outside the dashboard's scope.
 //
-// Matching is restricted to the structured JSON value via OR-of-two-ILIKEs,
-// so narrative mentions of the phrase in key_quotes / summary text don't
-// produce false positives. Both compact (no space after colon) and spaced
-// JSON formats are covered — those are the only two shapes the model emits
-// in practice.
+// Matching is restricted to the structured JSON value via case-insensitive
+// POSIX regex, so narrative mentions of the phrase in key_quotes / summary
+// text don't produce false positives. The optional `<n>. ` prefix mirrors
+// the dashboard's stripItemNum logic — both display as the bare label.
 export async function dbGetConversationsByIssueBeforeCutoff(
   issueLabel: string,
   cutoffISO: string,
   fromDateISO: string,
   limit: number,
 ): Promise<MinimalConversation[]> {
-  const orFilter = buildIssueTagOrFilter(issueLabel);
+  const pattern = buildIssueTagPattern(issueLabel);
   const { data, error } = await supabase
     .from('conversations')
     .select('id, intercom_id, player_name, player_email, agent_name, brand, original_text')
-    .or(orFilter)
+    .filter('summary', 'imatch', pattern)
     .lt('analyzed_at', cutoffISO)
     .gte('intercom_created_at', fromDateISO)
     .order('analyzed_at', { ascending: true })
@@ -882,27 +882,25 @@ export async function dbCountConversationsByIssueBeforeCutoff(
   cutoffISO: string,
   fromDateISO: string,
 ): Promise<number> {
-  const orFilter = buildIssueTagOrFilter(issueLabel);
+  const pattern = buildIssueTagPattern(issueLabel);
   const { count, error } = await supabase
     .from('conversations')
     .select('id', { count: 'exact', head: true })
-    .or(orFilter)
+    .filter('summary', 'imatch', pattern)
     .lt('analyzed_at', cutoffISO)
     .gte('intercom_created_at', fromDateISO);
   if (error) throw new Error(`[db] count conversations by issue: ${error.message}`);
   return count ?? 0;
 }
 
-// Builds a Supabase `.or()` filter string that matches the issue label as a
-// structured JSON value (`"item":"<label>"` with or without a space). Throws
-// on label characters that would break the comma-separated .or() syntax.
-function buildIssueTagOrFilter(issueLabel: string): string {
-  if (/[,()]/.test(issueLabel)) {
-    throw new Error('issueLabel may not contain commas or parentheses');
-  }
-  const compact = `%"item":"${issueLabel}"%`;
-  const spaced  = `%"item": "${issueLabel}"%`;
-  return `summary.ilike.${compact},summary.ilike.${spaced}`;
+// Builds a Postgres POSIX regex pattern that matches the issue label as the
+// value of a JSON `item` key, with optional whitespace around the colon and
+// an optional `<n>. ` numeric prefix on the value (e.g. matches both
+// `"item":"Slow response times"` and `"item": "13. Slow response times"`).
+function buildIssueTagPattern(issueLabel: string): string {
+  // Escape regex metacharacters in the user-supplied label.
+  const escaped = issueLabel.replace(/[.*+?^${}|[\]\\]/g, '\\$&');
+  return `"item"\\s*:\\s*"(\\d+\\.\\s*)?${escaped}"`;
 }
 
 // Writes only the AI analysis fields — does NOT overwrite Intercom metadata
