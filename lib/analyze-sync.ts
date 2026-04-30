@@ -38,6 +38,17 @@ function buildUserMessage(conv: MinimalConversation): string {
   ].join('\n');
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Parse OpenAI's "Please try again in 21.186s" hint from a 429 body. Returns
+// the suggested wait in ms, capped at 30s, with a 500ms safety buffer. Falls
+// back to 20s if the hint isn't present.
+function parseRetryAfterMs(body: string): number {
+  const match = body.match(/try again in ([\d.]+)\s*s/i);
+  const seconds = match ? parseFloat(match[1]) : 20;
+  return Math.min(seconds * 1000 + 500, 30_000);
+}
+
 export async function analyzeConversationSync(
   conv: MinimalConversation,
   prompt: { id: string; content: string },
@@ -45,25 +56,41 @@ export async function analyzeConversationSync(
 ): Promise<SyncAnalysisResult> {
   const startedAt = Date.now();
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: prompt.content },
-          { role: 'user', content: buildUserMessage(conv) },
-        ],
-        // Match the manual "Run QA" button (app/api/conversation/route.ts) so
-        // automated cron output is identical to on-demand analysis. gpt-5-mini
-        // produced divergent verdicts (e.g. "Unresolved" / "Slow response times"
-        // where gpt-4o gives "Resolved" / "Delayed Follow-Ups").
-        temperature: 0.3,
-      }),
+    const requestBody = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: prompt.content },
+        { role: 'user', content: buildUserMessage(conv) },
+      ],
+      // Match the manual "Run QA" button (app/api/conversation/route.ts) so
+      // automated cron output is identical to on-demand analysis. gpt-5-mini
+      // produced divergent verdicts (e.g. "Unresolved" / "Slow response times"
+      // where gpt-4o gives "Resolved" / "Delayed Follow-Ups").
+      temperature: 0.3,
     });
+
+    // Retry once on 429 — gpt-4o tier-1 has a tight 30k TPM cap and bursts
+    // can transiently exceed it even with sequential pacing. The retry-after
+    // hint OpenAI returns ("try again in 21.186s") tells us exactly how long
+    // to wait; we honor it within a 30s ceiling.
+    let res: Response;
+    let attempt = 0;
+    while (true) {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: requestBody,
+      });
+      if (res.status !== 429 || attempt >= 1) break;
+      const retryBody = await res.text();
+      const waitMs = parseRetryAfterMs(retryBody);
+      console.warn(`[analyze-sync] 429 on ${conv.id}, retrying in ${waitMs}ms`);
+      await sleep(waitMs);
+      attempt++;
+    }
 
     if (!res.ok) {
       const errorBody = await res.text();
@@ -140,4 +167,28 @@ export async function analyzeConversationSync(
       durationMs: Date.now() - startedAt,
     };
   }
+}
+
+// Run a batch of conversations through analyzeConversationSync sequentially,
+// pausing between calls to stay under gpt-4o's 30k TPM cap. Each call uses
+// ~10k tokens (fat system prompt + transcript + up to 4k completion); a 15s
+// gap holds sustained throughput at ~3 calls/min, just under the cap.
+//
+// Used by the cron, the admin sync-analyze catch-up, and the admin reanalyze
+// endpoint so all three share the same pacing logic. Always returns one
+// SyncAnalysisResult per input conversation (analyzeConversationSync wraps
+// its own errors, so this never rejects).
+export async function analyzeBatchSequential(
+  conversations: MinimalConversation[],
+  prompt: { id: string; content: string },
+  apiKey: string,
+  opts?: { delayMs?: number },
+): Promise<SyncAnalysisResult[]> {
+  const delayMs = opts?.delayMs ?? 15_000;
+  const results: SyncAnalysisResult[] = [];
+  for (let i = 0; i < conversations.length; i++) {
+    if (i > 0) await sleep(delayMs);
+    results.push(await analyzeConversationSync(conversations[i], prompt, apiKey));
+  }
+  return results;
 }
