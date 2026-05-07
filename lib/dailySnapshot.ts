@@ -84,7 +84,11 @@ export interface SeverityRow {
 
 export interface BreakdownRow {
   rank: string;             // "01"..
-  label: string;
+  label: string;            // underlying value used to build the deep-link
+  // Pre-formatted label as shown in the email. Defaults to `${rank} · ${label}`
+  // when omitted; languages override this to render `${flag} ${fullName}`
+  // (no rank prefix per the mockup).
+  displayLabel?: string;
   count: number;
   pct: number;
   delta: DeltaPill;
@@ -769,6 +773,9 @@ export async function buildSnapshot(opts: BuildOptions = {}): Promise<SnapshotDa
   );
 
   // ── Language breakdown ──
+  // Display format per the mockup: "🇬🇧 English" (flag + full name, no rank
+  // prefix). The underlying `label` stays as the ISO code so the deep-link
+  // filter still matches the dashboard's language filter.
   const langAgg = tally(parsed.filter((p) => p.isAnalyzed), (p) => {
     if (!p.languageUpper) return [];
     return [{ key: p.languageUpper, label: p.languageUpper }];
@@ -780,7 +787,7 @@ export async function buildSnapshot(opts: BuildOptions = {}): Promise<SnapshotDa
     METRIC_DIRECTION.language,
     hasFullBaseline,
     (label) => link({ language: label }, `${label} on ${w.targetISO}`),
-  );
+  ).map((r) => ({ ...r, displayLabel: formatLanguageDisplay(r.label) }));
 
   // ── Agent volume (all agents, ranked) ──
   const agentAgg = tally(parsed.filter((p) => p.isAnalyzed), (p) => [{ key: p.agent.toLowerCase(), label: p.agent }]);
@@ -846,6 +853,41 @@ function formatHumanDate(d: Date): string {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   return `${days[d.getUTCDay()]}, ${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
+
+// ISO-639-1 → { flag, full English name } for the languages we see in this
+// project's data. The Arabic entry uses the GCC qualifier the dashboard's
+// language column carries; the flag is Saudi Arabia by convention since
+// there's no flag for the Arabic language itself. Unknown ISO codes fall
+// through to the bare code so the row still renders.
+const LANGUAGE_DISPLAY: Record<string, { flag: string; name: string }> = {
+  EN: { flag: '🇬🇧', name: 'English' },
+  DE: { flag: '🇩🇪', name: 'German' },
+  FR: { flag: '🇫🇷', name: 'French' },
+  IT: { flag: '🇮🇹', name: 'Italian' },
+  ES: { flag: '🇪🇸', name: 'Spanish' },
+  PT: { flag: '🇵🇹', name: 'Portuguese' },
+  NL: { flag: '🇳🇱', name: 'Dutch' },
+  SV: { flag: '🇸🇪', name: 'Swedish' },
+  NO: { flag: '🇳🇴', name: 'Norwegian' },
+  DA: { flag: '🇩🇰', name: 'Danish' },
+  FI: { flag: '🇫🇮', name: 'Finnish' },
+  PL: { flag: '🇵🇱', name: 'Polish' },
+  CS: { flag: '🇨🇿', name: 'Czech' },
+  EL: { flag: '🇬🇷', name: 'Greek' },
+  TR: { flag: '🇹🇷', name: 'Turkish' },
+  RU: { flag: '🇷🇺', name: 'Russian' },
+  HU: { flag: '🇭🇺', name: 'Hungarian' },
+  RO: { flag: '🇷🇴', name: 'Romanian' },
+  BG: { flag: '🇧🇬', name: 'Bulgarian' },
+  AR: { flag: '🇸🇦', name: 'Arabic (GCC)' },
+  JA: { flag: '🇯🇵', name: 'Japanese' },
+  ZH: { flag: '🇨🇳', name: 'Chinese' },
+};
+
+function formatLanguageDisplay(iso: string): string {
+  const v = LANGUAGE_DISPLAY[iso.toUpperCase()];
+  return v ? `${v.flag} ${v.name}` : iso;
 }
 
 // ── HTML rendering ────────────────────────────────────────────────────────
@@ -938,16 +980,20 @@ function issueRowHtml(r: IssueRow): string {
 }
 
 function breakdownRowHtml(r: BreakdownRow): string {
+  // 3 fixed columns so count and pill columns share the same right edge across
+  // every row, instead of wavering with content width. Label flex column gets
+  // (100% - 130 - 100). The displayLabel override lets languages drop the
+  // rank prefix in favour of "🇬🇧 English" formatting.
+  const shown = r.displayLabel ?? `${r.rank} · ${r.label}`;
   return `
     <tr>
-      <td style="padding:9px 0;border-bottom:1px solid ${COLORS.border};font-family:Arial,Helvetica,sans-serif;">
+      <td style="padding:0;border-bottom:1px solid ${COLORS.border};font-family:Arial,Helvetica,sans-serif;">
         <a href="${escapeHtml(r.href)}" style="text-decoration:none;color:inherit;display:block;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;">
             <tr>
-              <td style="font-size:13px;color:${COLORS.text2};">${escapeHtml(`${r.rank} · ${r.label}`)}</td>
-              <td align="right" style="font-size:13px;color:${COLORS.text1};font-weight:500;white-space:nowrap;">
-                ${r.count} (${r.pct}%) <span style="margin-left:6px;">${pillHtml(r.delta)}</span>
-              </td>
+              <td style="padding:9px 0;font-size:13px;color:${COLORS.text2};">${escapeHtml(shown)}</td>
+              <td align="right" width="130" style="padding:9px 12px 9px 0;font-size:13px;color:${COLORS.text1};font-weight:500;white-space:nowrap;">${r.count} (${r.pct}%)</td>
+              <td align="right" width="100" style="padding:9px 0;white-space:nowrap;">${pillHtml(r.delta)}</td>
             </tr>
           </table>
         </a>
