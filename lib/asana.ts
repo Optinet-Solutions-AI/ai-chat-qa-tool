@@ -646,10 +646,39 @@ async function createEnumOptionForField(fieldGid: string, name: string): Promise
   }
 }
 
+// Picks the gid of the section that a new AM section named `name` should be
+// inserted before to keep the board alphabetised. The "Completed" section is
+// pinned to the end: any new AM that sorts after every existing AM goes in
+// just before Completed. Returns null when the new section is alphabetically
+// last and there's no Completed section, so the caller appends.
+async function findAlphabeticalInsertBefore(name: string): Promise<string | null> {
+  const sections = await getProjectSections();
+  if (sections.size === 0) return null;
+
+  const newKey = name.trim().toLowerCase();
+  const others: Array<[string, string]> = [];
+  let completedGid: string | null = null;
+  for (const [n, gid] of sections) {
+    if (n === 'completed') {
+      completedGid = gid;
+      continue;
+    }
+    others.push([n, gid]);
+  }
+  others.sort((a, b) => a[0].localeCompare(b[0]));
+
+  for (const [n, gid] of others) {
+    if (newKey.localeCompare(n) < 0) return gid;
+  }
+  return completedGid;
+}
+
 async function createSectionForAccountManager(name: string): Promise<string | null> {
   if (!isAsanaConfigured()) return null;
   const token = process.env.ASANA_ACCESS_TOKEN!;
   const projectGid = process.env.ASANA_PROJECT_GID!;
+
+  const insertBefore = await findAlphabeticalInsertBefore(name);
 
   try {
     const res = await fetch(`${ASANA_API}/projects/${projectGid}/sections`, {
@@ -659,7 +688,9 @@ async function createSectionForAccountManager(name: string): Promise<string | nu
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ data: { name } }),
+      body: JSON.stringify({
+        data: { name, ...(insertBefore ? { insert_before: insertBefore } : {}) },
+      }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
