@@ -537,23 +537,30 @@ export default function DashboardPage() {
 
   const navToConversations = useCallback((extra: Record<string, string>, e?: React.MouseEvent | MouseEvent) => {
     const filters: Record<string, string | string[]> = {};
-    if (dateFrom)        filters.dateFrom        = dateFrom;
-    if (dateTo)          filters.dateTo          = dateTo;
-    // Forward each multi-select as an array (or a plain string when exactly
-    // one value is selected). The overlay sends arrays through as repeated
-    // query params; /api/conversations reads them via getAll().
-    const passMulti = (key: string, vals: string[]) => { if (vals.length > 0) filters[key] = vals.length === 1 ? vals[0] : vals; };
-    passMulti('brand',           brands);
-    passMulti('agent_name',      agents);
-    passMulti('account_manager', accountManagers);
-    passMulti('segment',         segments);
-    passMulti('vip_level',       vipLevels);
-    passMulti('language',        languages);
-    passMulti('player_country',  countries);
-    passMulti('issue_category',  categories);
-    passMulti('issue_item',      issues);
-    passMulti('dissatisfaction_severity', severities.map((s) => `Level ${s}`));
-    passMulti('resolution_status', resolutions);
+    // Pending Action cards drill into the GLOBAL pending bucket — the card
+    // stat is computed without any dashboard filters (see app/api/dashboard
+    // pendingUnder24h/pendingOver24h). The modal must match, otherwise the
+    // user sees e.g. card=221 but modal=0 when their date filter is "today".
+    const isGlobalDrill = 'pending_age' in extra;
+    if (!isGlobalDrill) {
+      if (dateFrom)        filters.dateFrom        = dateFrom;
+      if (dateTo)          filters.dateTo          = dateTo;
+      // Forward each multi-select as an array (or a plain string when exactly
+      // one value is selected). The overlay sends arrays through as repeated
+      // query params; /api/conversations reads them via getAll().
+      const passMulti = (key: string, vals: string[]) => { if (vals.length > 0) filters[key] = vals.length === 1 ? vals[0] : vals; };
+      passMulti('brand',           brands);
+      passMulti('agent_name',      agents);
+      passMulti('account_manager', accountManagers);
+      passMulti('segment',         segments);
+      passMulti('vip_level',       vipLevels);
+      passMulti('language',        languages);
+      passMulti('player_country',  countries);
+      passMulti('issue_category',  categories);
+      passMulti('issue_item',      issues);
+      passMulti('dissatisfaction_severity', severities.map((s) => `Level ${s}`));
+      passMulti('resolution_status', resolutions);
+    }
     Object.entries(extra).forEach(([k, v]) => { if (v) filters[k] = v; });
 
     // Build a human-readable title from the extra filters

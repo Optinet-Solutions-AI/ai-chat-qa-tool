@@ -95,9 +95,16 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
     return toUsDate(from ?? to ?? todayISO());
   }
 
-  // Strip Windows-illegal filename chars (e.g. the colon in "Issue: Bonus Codes…").
+  // Replace Windows-illegal filename chars. `<` and `>` are substituted
+  // (not stripped) so "Pending Action <24h" reads as "Pending Action under
+  // 24h" in the saved file rather than losing the operator entirely.
   function safeTitle(s: string): string {
-    return s.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    return s
+      .replace(/</g, 'under ')
+      .replace(/>/g, 'over ')
+      .replace(/[:"/\\|?*]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   // Severity: parse from summary JSON the same way the dashboard chart does so
