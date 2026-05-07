@@ -122,6 +122,10 @@ export interface SnapshotData {
   brands: BreakdownRow[];
   languages: BreakdownRow[];
   agents: AgentRow[];
+  // Full ordered list of issues seen on the target day (count > 0). Mirrors
+  // the dashboard's "Issues Breakdown" widget — same row format as topIssues
+  // with no top-N cap.
+  issuesBreakdown: IssueRow[];
 }
 
 // ── Window math ───────────────────────────────────────────────────────────
@@ -650,12 +654,26 @@ export async function buildSnapshot(opts: BuildOptions = {}): Promise<SnapshotDa
     baselineAvg: v.baselineTotal / BASELINE_DAYS,
   }));
 
-  const topIssuesSorted = [...allIssues]
+  const issuesByTargetDesc = [...allIssues]
+    .filter((x) => x.target > 0)
+    .sort((a, b) => b.target - a.target || a.label.localeCompare(b.label));
+
+  const topIssuesSorted = issuesByTargetDesc
     .filter((x) => x.target >= (opts.minIssueCount ?? 1))
-    .sort((a, b) => b.target - a.target || a.label.localeCompare(b.label))
     .slice(0, 5);
   const topIssueLabels = new Set(topIssuesSorted.map((x) => x.label));
   const topIssues: IssueRow[] = topIssuesSorted.map((x, i) => ({
+    rank: String(i + 1).padStart(2, '0'),
+    label: x.label,
+    count: x.target,
+    delta: formatPill(x.target, x.baselineAvg, METRIC_DIRECTION.issue, hasFullBaseline),
+    href: link({ issue_item: x.label }, `${x.label} on ${w.targetISO}`),
+  }));
+
+  // Issues Breakdown: full ordered list of yesterday's issues (mirrors the
+  // dashboard widget). Same row format as topIssues, no slice — recipients
+  // get the long tail, with deep-links to drill into any of them.
+  const issuesBreakdown: IssueRow[] = issuesByTargetDesc.map((x, i) => ({
     rank: String(i + 1).padStart(2, '0'),
     label: x.label,
     count: x.target,
@@ -799,6 +817,7 @@ export async function buildSnapshot(opts: BuildOptions = {}): Promise<SnapshotDa
     brands,
     languages,
     agents,
+    issuesBreakdown,
   };
 }
 
@@ -898,16 +917,19 @@ function tile(t: GlanceTile, width: string): string {
 }
 
 function issueRowHtml(r: IssueRow): string {
+  // Fixed widths on rank/count/pill so every row's columns align across the
+  // section. Without these, each row's nested table sized its own columns
+  // and the count column drifted left/right by issue-name length.
   return `
     <tr>
       <td style="background:${COLORS.bgTile};border:1px solid ${COLORS.border};border-radius:8px;padding:0;">
         <a href="${escapeHtml(r.href)}" style="display:block;text-decoration:none;color:inherit;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,Helvetica,sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,Helvetica,sans-serif;table-layout:fixed;">
             <tr>
               <td width="36" style="padding:12px 0 12px 16px;font-size:12px;font-weight:600;color:${COLORS.text3};">${escapeHtml(r.rank)}</td>
               <td style="padding:12px 14px;font-size:14px;color:${COLORS.text1};">${escapeHtml(r.label)}</td>
-              <td align="right" style="padding:12px 14px;font-size:15px;font-weight:600;color:${COLORS.text1};white-space:nowrap;">${r.count}</td>
-              <td align="right" style="padding:12px 16px 12px 0;white-space:nowrap;">${pillHtml(r.delta)}</td>
+              <td align="right" width="60" style="padding:12px 14px;font-size:15px;font-weight:600;color:${COLORS.text1};white-space:nowrap;">${r.count}</td>
+              <td align="right" width="110" style="padding:12px 16px 12px 0;white-space:nowrap;">${pillHtml(r.delta)}</td>
             </tr>
           </table>
         </a>
@@ -934,20 +956,20 @@ function breakdownRowHtml(r: BreakdownRow): string {
 }
 
 function agentRowHtml(r: AgentRow): string {
+  // Cells go directly in the outer Agent Volume table so column widths line
+  // up with the header row. (The earlier nested-table pattern made the data
+  // rows size independently of the header, which split them visually — the
+  // header sat to the right while the data clustered to the left.)
+  // The same href is repeated on each cell's <a> so any click on any cell
+  // navigates correctly; visually this reads as a single clickable row.
+  const linkStyle = `text-decoration:none;color:inherit;display:block;`;
+  const cellBase = `border-bottom:1px solid ${COLORS.border};font-family:Arial,Helvetica,sans-serif;`;
   return `
     <tr>
-      <td style="background:${COLORS.bgTile};">
-        <a href="${escapeHtml(r.href)}" style="text-decoration:none;color:inherit;display:block;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,Helvetica,sans-serif;">
-            <tr>
-              <td width="40" style="padding:10px 14px;font-size:13px;color:${COLORS.text3};border-bottom:1px solid ${COLORS.border};">${escapeHtml(r.rank)}</td>
-              <td style="padding:10px 14px;font-size:13px;font-weight:500;color:${COLORS.text1};border-bottom:1px solid ${COLORS.border};">${escapeHtml(r.name)}</td>
-              <td align="right" width="80" style="padding:10px 14px;font-size:13px;font-weight:600;color:${COLORS.text1};border-bottom:1px solid ${COLORS.border};white-space:nowrap;">${r.count}</td>
-              <td align="right" width="120" style="padding:10px 14px;border-bottom:1px solid ${COLORS.border};white-space:nowrap;">${pillHtml(r.delta)}</td>
-            </tr>
-          </table>
-        </a>
-      </td>
+      <td width="40" style="padding:10px 14px;font-size:13px;color:${COLORS.text3};${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${escapeHtml(r.rank)}</a></td>
+      <td style="padding:10px 14px;font-size:13px;font-weight:500;color:${COLORS.text1};${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${escapeHtml(r.name)}</a></td>
+      <td align="right" width="80" style="padding:10px 14px;font-size:13px;font-weight:600;color:${COLORS.text1};white-space:nowrap;${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${r.count}</a></td>
+      <td align="right" width="120" style="padding:10px 14px;white-space:nowrap;${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${pillHtml(r.delta)}</a></td>
     </tr>`;
 }
 
@@ -1003,6 +1025,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
   const brandRowsHtml = data.brands.map(breakdownRowHtml).join('');
   const langRowsHtml  = data.languages.map(breakdownRowHtml).join('');
   const agentRowsHtml = data.agents.map(agentRowHtml).join('');
+  const issuesBreakdownRowsHtml = data.issuesBreakdown.map(issueRowHtml).join('');
 
   // Resolution rows — laid out as a mini table similar to language/brand but
   // without the deep-link (resolution_status drill is supported by the overlay
@@ -1108,9 +1131,9 @@ export function renderSnapshotHTML(data: SnapshotData): string {
       </td></tr>
 
       <!-- AGENT VOLUME -->
-      <tr><td style="padding:24px 36px;">
+      <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
         ${sectionHeader('Agent Volume', 'vs 7-day average')}
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.bgTile};border:1px solid ${COLORS.border};border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.bgTile};border:1px solid ${COLORS.border};border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;table-layout:fixed;">
           <tr>
             <td width="40" style="padding:10px 14px;background:${COLORS.bgCard};color:${COLORS.text3};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid ${COLORS.border};">#</td>
             <td style="padding:10px 14px;background:${COLORS.bgCard};color:${COLORS.text3};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid ${COLORS.border};">Agent</td>
@@ -1118,6 +1141,14 @@ export function renderSnapshotHTML(data: SnapshotData): string {
             <td align="right" width="120" style="padding:10px 14px;background:${COLORS.bgCard};color:${COLORS.text3};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid ${COLORS.border};">vs 7d avg</td>
           </tr>
           ${agentRowsHtml || `<tr><td colspan="4" style="padding:12px 14px;font-size:13px;color:${COLORS.text3};">No agent data.</td></tr>`}
+        </table>
+      </td></tr>
+
+      <!-- ISSUES BREAKDOWN -->
+      <tr><td style="padding:24px 36px;">
+        ${sectionHeader('Issues Breakdown', 'full ordered list of yesterday\'s issues · vs 7-day average')}
+        <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;">
+          ${issuesBreakdownRowsHtml || `<tr><td style="padding:12px 16px;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No analyzed issues yesterday.</td></tr>`}
         </table>
       </td></tr>
 
