@@ -83,11 +83,21 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
+  function toUsDate(iso: string): string {
+    const [y, m, d] = iso.split('-');
+    return `${m}.${d}.${y}`;
+  }
+
   function filenameDateSuffix(): string {
     const from = pickFirst(filters.dateFrom);
     const to   = pickFirst(filters.dateTo);
-    if (from && to && from !== to) return `${from}_to_${to}`;
-    return from ?? to ?? todayISO();
+    if (from && to && from !== to) return `${toUsDate(from)} - ${toUsDate(to)}`;
+    return toUsDate(from ?? to ?? todayISO());
+  }
+
+  // Strip Windows-illegal filename chars (e.g. the colon in "Issue: Bonus Codes…").
+  function safeTitle(s: string): string {
+    return s.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
   }
 
   // Severity: parse from summary JSON the same way the dashboard chart does so
@@ -169,7 +179,7 @@ export default function ConversationsOverlay({ filters, title, onClose }: Props)
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `conversations_${filenameDateSuffix()}.csv`;
+      a.download = `${safeTitle(title)} - ${filenameDateSuffix()}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
