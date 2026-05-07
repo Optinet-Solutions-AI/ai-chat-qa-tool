@@ -1046,10 +1046,17 @@ function severityBarHtml(severities: SeverityRow[]): string {
   return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-radius:6px;overflow:hidden;border:1px solid ${COLORS.border};table-layout:fixed;"><tr>${cells}</tr></table>`;
 }
 
-function sectionHeader(title: string, sub?: string): string {
+function sectionHeader(title: string, sub?: string, icon?: string): string {
+  // The icon span has its own font-size + line-height so the emoji doesn't
+  // inherit the section-header's letter-spacing (which can space colour
+  // characters of compound flags weirdly). Sized slightly larger than the
+  // title text so it reads as a leading bullet, matching the mockup.
+  const iconHtml = icon
+    ? `<span style="font-size:14px;letter-spacing:0;margin-right:8px;vertical-align:-2px;">${icon}</span>`
+    : '';
   return `
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:${COLORS.text2};margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;">
-      ${escapeHtml(title)}${sub ? ` <span style="font-size:10px;font-weight:400;color:${COLORS.text3};text-transform:none;letter-spacing:0.02em;margin-left:6px;">${escapeHtml(sub)}</span>` : ''}
+      ${iconHtml}${escapeHtml(title)}${sub ? ` <span style="font-size:10px;font-weight:400;color:${COLORS.text3};text-transform:none;letter-spacing:0.02em;margin-left:6px;">${escapeHtml(sub)}</span>` : ''}
     </div>`;
 }
 
@@ -1122,14 +1129,14 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- GLANCE -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Yesterday at a Glance')}
+        ${sectionHeader('Yesterday at a Glance', undefined, '📊')}
         <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;"><tr>${glanceTopCells}</tr></table>
         <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;margin-top:0;"><tr>${glanceBottomCells}</tr></table>
       </td></tr>
 
       <!-- TOP 5 ISSUES -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Top 5 Issues Yesterday', 'vs 7-day average')}
+        ${sectionHeader('Top 5 Issues Yesterday', 'vs 7-day average', '🔥')}
         <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;">
           ${issueRowsHtml || `<tr><td style="padding:12px 16px;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No analyzed issues yesterday.</td></tr>`}
         </table>
@@ -1137,7 +1144,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- TOP 5 MOVERS -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Top 5 Movers', 'biggest difference vs 7-day average · excludes Top 5 Issues')}
+        ${sectionHeader('Top 5 Movers', 'biggest difference vs 7-day average · excludes Top 5 Issues', '📈')}
         <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;">
           ${moverRowsHtml || `<tr><td style="padding:12px 16px;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No movers above the volume threshold.</td></tr>`}
         </table>
@@ -1148,11 +1155,11 @@ export function renderSnapshotHTML(data: SnapshotData): string {
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
             <td width="50%" valign="top" style="padding-right:14px;">
-              ${sectionHeader('Resolution Status')}
+              ${sectionHeader('Resolution Status', undefined, '✅')}
               <table width="100%" cellpadding="0" cellspacing="0" border="0">${resolutionRowsHtml}</table>
             </td>
             <td width="50%" valign="top" style="padding-left:14px;">
-              ${sectionHeader('Severity Breakdown')}
+              ${sectionHeader('Severity Breakdown', undefined, '⚠️')}
               ${severityBarHtml(data.severities)}
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">${severityRowsHtml}</table>
             </td>
@@ -1162,7 +1169,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- VOLUME PER BRAND -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Volume per Brand', 'vs 7-day average')}
+        ${sectionHeader('Volume per Brand', 'vs 7-day average', '🏷️')}
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           ${brandRowsHtml || `<tr><td style="padding:12px 0;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No brand data.</td></tr>`}
         </table>
@@ -1170,7 +1177,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- VOLUME PER LANGUAGE -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Volume per Language', 'vs 7-day average')}
+        ${sectionHeader('Volume per Language', 'vs 7-day average', '🌐')}
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           ${langRowsHtml || `<tr><td style="padding:12px 0;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No language data.</td></tr>`}
         </table>
@@ -1178,7 +1185,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- AGENT VOLUME -->
       <tr><td style="padding:24px 36px;border-bottom:1px solid ${COLORS.border};">
-        ${sectionHeader('Agent Volume', 'vs 7-day average')}
+        ${sectionHeader('Agent Volume', 'vs 7-day average', '👥')}
         <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.bgTile};border:1px solid ${COLORS.border};border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;table-layout:fixed;">
           <tr>
             <td width="40" style="padding:10px 14px;background:${COLORS.bgCard};color:${COLORS.text3};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid ${COLORS.border};">#</td>
@@ -1192,7 +1199,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
 
       <!-- ISSUES BREAKDOWN -->
       <tr><td style="padding:24px 36px;">
-        ${sectionHeader('Issues Breakdown', 'full ordered list of yesterday\'s issues · vs 7-day average')}
+        ${sectionHeader('Issues Breakdown', 'full ordered list of yesterday\'s issues · vs 7-day average', '📋')}
         <table width="100%" cellpadding="0" cellspacing="6" border="0" style="border-collapse:separate;">
           ${issuesBreakdownRowsHtml || `<tr><td style="padding:12px 16px;font-size:13px;color:${COLORS.text3};font-family:Arial,Helvetica,sans-serif;">No analyzed issues yesterday.</td></tr>`}
         </table>
