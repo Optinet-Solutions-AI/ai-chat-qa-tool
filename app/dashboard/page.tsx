@@ -247,7 +247,8 @@ function lastTwoCompletedUtcDayLabels() {
   const day  = new Date(startOfTodayUtc); day.setUTCDate(day.getUTCDate()  - 1);
   const prev = new Date(startOfTodayUtc); prev.setUTCDate(prev.getUTCDate() - 2);
   const f = (d: Date) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
-  return { day: f(day), prev: f(prev) };
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  return { day: f(day), prev: f(prev), dayIso: iso(day), prevIso: iso(prev) };
 }
 
 // Ctrl/Cmd-click or middle-click → open in new tab instead of overlay
@@ -535,7 +536,7 @@ export default function DashboardPage() {
   const [severities, setSeverities]             = useState<string[]>([]);
   const [resolutions, setResolutions]           = useState<string[]>([]);
 
-  const navToConversations = useCallback((extra: Record<string, string>, e?: React.MouseEvent | MouseEvent) => {
+  const navToConversations = useCallback((extra: Record<string, string | string[]>, e?: React.MouseEvent | MouseEvent) => {
     const filters: Record<string, string | string[]> = {};
     // Pending Action cards drill into the GLOBAL pending bucket — the card
     // stat is computed without any dashboard filters (see app/api/dashboard
@@ -563,10 +564,18 @@ export default function DashboardPage() {
       passMulti('dissatisfaction_severity', severities.map((s) => `Level ${s}`));
       passMulti('resolution_status', resolutions);
     }
-    Object.entries(extra).forEach(([k, v]) => { if (v) filters[k] = v; });
+    Object.entries(extra).forEach(([k, v]) => {
+      if (v == null) return;
+      if (Array.isArray(v) && v.length === 0) return;
+      filters[k] = v;
+    });
 
     // Build a human-readable title from the extra filters
-    const extraEntries = Object.entries(extra).filter(([, v]) => v);
+    const extraEntries = Object.entries(extra).filter(([, v]) => {
+      if (v == null) return false;
+      if (Array.isArray(v)) return v.length > 0;
+      return v !== '';
+    });
     let title = 'Conversations';
     if (extraEntries.length > 0) {
       const [key, val] = extraEntries[0];
@@ -579,6 +588,8 @@ export default function DashboardPage() {
       else if (val === 'closed' && key === 'asana_status') title = 'Resolved Escalations';
       else if (val === 'under_24h' && key === 'pending_age') title = 'Pending Action <24h';
       else if (val === 'over_24h' && key === 'pending_age')  title = 'Pending Action >24h';
+      else if (Array.isArray(val) && key === 'dissatisfaction_severity') title = 'Dissatisfied Conversations';
+      else if (Array.isArray(val)) title = `${label}: ${val.join(', ')}`;
       else title = `${label}: ${val}`;
     }
 
@@ -1099,7 +1110,7 @@ export default function DashboardPage() {
                 const spikeDates = lastTwoCompletedUtcDayLabels();
                 return (
                 <ResponsiveContainer width="100%" height={290}>
-                  <BarChart data={data.issueSpikes} margin={{ top: 8, right: 12, left: -10, bottom: 24 }}>
+                  <BarChart data={data.issueSpikes} margin={{ top: 8, right: 12, left: -10, bottom: 24 }} style={{ cursor: 'pointer' }}>
                     <defs>
                       {/* Vertical neon gradients — Today is the bright/saturated bar,
                           Yesterday is a dimmer, more transparent version of the same
@@ -1141,8 +1152,28 @@ export default function DashboardPage() {
                         </div>
                       )}
                     />
-                    <Bar dataKey="today"     name={`Yesterday (${spikeDates.day})`}    fill="url(#spikeToday)"     radius={[6, 6, 0, 0]} activeBar={{ filter: 'url(#barGlowSpike)' }} />
-                    <Bar dataKey="yesterday" name={`Day Before (${spikeDates.prev})`} fill="url(#spikeYesterday)" radius={[6, 6, 0, 0]} activeBar={{ filter: 'url(#barGlowSpike)' }} />
+                    <Bar
+                      dataKey="today"
+                      name={`Yesterday (${spikeDates.day})`}
+                      fill="url(#spikeToday)"
+                      radius={[6, 6, 0, 0]}
+                      activeBar={{ filter: 'url(#barGlowSpike)' }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onClick={(d: any, _i: number, e: any) => { if (d?.issue) navToConversations({ issue_item: d.issue, dateFrom: spikeDates.dayIso, dateTo: spikeDates.dayIso }, e); }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onMouseDown={(d: any, _i: number, e: any) => { if (e?.button === 1 && d?.issue) { e.preventDefault?.(); navToConversations({ issue_item: d.issue, dateFrom: spikeDates.dayIso, dateTo: spikeDates.dayIso }, e); } }}
+                    />
+                    <Bar
+                      dataKey="yesterday"
+                      name={`Day Before (${spikeDates.prev})`}
+                      fill="url(#spikeYesterday)"
+                      radius={[6, 6, 0, 0]}
+                      activeBar={{ filter: 'url(#barGlowSpike)' }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onClick={(d: any, _i: number, e: any) => { if (d?.issue) navToConversations({ issue_item: d.issue, dateFrom: spikeDates.prevIso, dateTo: spikeDates.prevIso }, e); }}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onMouseDown={(d: any, _i: number, e: any) => { if (e?.button === 1 && d?.issue) { e.preventDefault?.(); navToConversations({ issue_item: d.issue, dateFrom: spikeDates.prevIso, dateTo: spikeDates.prevIso }, e); } }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
                 );
@@ -1159,7 +1190,37 @@ export default function DashboardPage() {
                 <Empty message="No dissatisfaction data in the last 30 days" />
               ) : (
                 <ResponsiveContainer width="100%" height={240}>
-                  <AreaChart data={data.dissatisfactionTrend.data} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
+                  <AreaChart
+                    data={data.dissatisfactionTrend.data}
+                    margin={{ top: 8, right: 16, left: -10, bottom: 0 }}
+                    style={{ cursor: 'pointer' }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    onClick={(d: any, e: any) => {
+                      if (!d?.activeLabel) return;
+                      navToConversations(
+                        {
+                          dissatisfaction_severity: ['Level 1', 'Level 2', 'Level 3'],
+                          dateFrom: d.activeLabel,
+                          dateTo: d.activeLabel,
+                        },
+                        e,
+                      );
+                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    onMouseDown={(d: any, e: any) => {
+                      if (e?.button === 1 && d?.activeLabel) {
+                        e.preventDefault?.();
+                        navToConversations(
+                          {
+                            dateFrom: d.activeLabel,
+                            dateTo: d.activeLabel,
+                            dissatisfaction_severity: ['Level 1', 'Level 2', 'Level 3'],
+                          },
+                          e,
+                        );
+                      }
+                    }}
+                  >
                     <defs>
                       {data.dissatisfactionTrend.issues.map((issue, i) => {
                         const c = COLORS[i % COLORS.length];
@@ -1264,6 +1325,7 @@ export default function DashboardPage() {
                 palette="magenta"
                 cellHeight="22px"
                 rowLabelWidth="80px"
+                onCellClick={(rowKey, _colKey, _v, e) => navToConversations({ dateFrom: rowKey, dateTo: rowKey }, e)}
               />
             )}
           </Section>
