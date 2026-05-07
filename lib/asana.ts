@@ -76,7 +76,7 @@
 // the user deleted on purpose.
 
 import { cleanPlayerName, getVipLevel, getBacklinkFull, parseSummaryForTable, parseKeyQuotesFromSummary, getSegment } from '@/lib/utils';
-import { evaluateEscalation, severityToNumber, extractCategoryNumbers } from '@/lib/escalationRules';
+import { evaluateEscalation, severityToNumber, normalizeResolution } from '@/lib/escalationRules';
 
 const ASANA_API = 'https://app.asana.com/api/1.0';
 
@@ -893,17 +893,18 @@ export async function maybeCreateAsanaTicketForConversation(
       if (it && !seenItem.has(it)) { seenItem.add(it); issueItems.push(it); }
     }
 
-    // Gate against the (segment, severity, category) escalation matrix —
-    // SoftSwiss never escalates, VIP always does, NON-VIP only escalates
-    // sev-1/2 for categories 1-5 (sev-3 always escalates). See
+    // Gate against the (issue, severity, resolution, segment) escalation
+    // matrix — SoftSwiss never escalates; sev 2/3 always escalate for VIP and
+    // NON-VIP; sev 0/1 cells depend on the per-issue pattern. See
     // lib/escalationRules.ts for the full table.
     const segment = getSegment(ctx);
-    const categoryNumbers = extractCategoryNumbers(issueCategories);
-    const decision = evaluateEscalation(segment, severityNum, categoryNumbers);
+    const resolution = normalizeResolution(parsed.resolution_status);
+    const decision = evaluateEscalation(segment, severityNum, resolution, issueItems);
     if (!decision.escalate) {
       console.log(
         `[asana] skip escalation for ${conversationId}: ${decision.reason} ` +
-        `(segment=${segment ?? 'null'}, severity=${normalizedSev ?? 'null'}, categories=[${categoryNumbers.join(',')}])`,
+        `(segment=${segment ?? 'null'}, severity=${normalizedSev ?? 'null'}, ` +
+        `resolution=${resolution ?? 'null'}, items=[${issueItems.join('|')}])`,
       );
       return null;
     }

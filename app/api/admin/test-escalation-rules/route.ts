@@ -8,6 +8,7 @@ import {
   evaluateEscalation,
   severityToNumber,
   extractCategoryNumbers,
+  normalizeResolution,
 } from '@/lib/escalationRules';
 
 // Read-only dry-run for the escalation rule gate. Mirrors the logic in
@@ -112,7 +113,8 @@ export async function GET(req: NextRequest) {
 
   const segment = getSegment(ctx);
   const categoryNumbers = extractCategoryNumbers(issueCategories);
-  const decision = evaluateEscalation(segment, severityNum, categoryNumbers);
+  const resolution = normalizeResolution(parsed.resolution_status);
+  const decision = evaluateEscalation(segment, severityNum, resolution, issueItems);
 
   return NextResponse.json({
     conversation_id: row.id,
@@ -123,6 +125,8 @@ export async function GET(req: NextRequest) {
       segment,
       severity_normalized: normalizedSev,
       severity_number: severityNum,
+      resolution_raw: parsed.resolution_status,
+      resolution_normalized: resolution,
       raw_categories: issueCategories,
       raw_issues: issueItems,
       matched_category_numbers: categoryNumbers,
