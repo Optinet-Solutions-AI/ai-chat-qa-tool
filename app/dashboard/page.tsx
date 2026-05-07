@@ -1138,16 +1138,16 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={290}>
                   <BarChart data={data.issueSpikes} margin={{ top: 8, right: 12, left: -10, bottom: 24 }} style={{ cursor: 'pointer' }}>
                     <defs>
-                      {/* Vertical neon gradients — Today is the bright/saturated bar,
-                          Yesterday is a dimmer, more transparent version of the same
-                          hue so the comparison reads as "now vs. fading reference". */}
+                      {/* Vertical neon gradients — Yesterday is the bright cyan bar,
+                          Day Before is a dimmer pink so the two days read as clearly
+                          distinct hues rather than two shades of the same color. */}
                       <linearGradient id="spikeToday" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%"   stopColor="#22d3ee" stopOpacity={1}   />
                         <stop offset="100%" stopColor="#0e7490" stopOpacity={0.85} />
                       </linearGradient>
                       <linearGradient id="spikeYesterday" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%"   stopColor="#67e8f9" stopOpacity={0.65} />
-                        <stop offset="100%" stopColor="#155e75" stopOpacity={0.35} />
+                        <stop offset="0%"   stopColor="#f9a8d4" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#9d174d" stopOpacity={0.45} />
                       </linearGradient>
                       <filter id="barGlowSpike" x="-50%" y="-50%" width="200%" height="200%">
                         <feGaussianBlur stdDeviation="4" result="blur" />
@@ -1172,7 +1172,7 @@ export default function DashboardPage() {
                             {`Yesterday (${spikeDates.day})`}
                           </span>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#94a3b8' }}>
-                            <span style={{ width: 8, height: 8, borderRadius: 999, background: '#67e8f9', opacity: 0.65, display: 'inline-block' }} />
+                            <span style={{ width: 8, height: 8, borderRadius: 999, background: '#f9a8d4', opacity: 0.85, display: 'inline-block' }} />
                             {`Day Before (${spikeDates.prev})`}
                           </span>
                         </div>
