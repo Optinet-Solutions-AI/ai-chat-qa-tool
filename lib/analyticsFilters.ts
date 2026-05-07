@@ -257,17 +257,23 @@ export const ANALYSIS_MIN_DATE_ISO = '2026-04-27T00:00:00.000Z';
 // is what keeps the dashboard overview counts and the drill-down list counts
 // in lock-step.
 export function applyConversationDbFilters(q: AnySupabaseQuery, f: DbFilterInputs): AnySupabaseQuery {
-  // Floor dateFrom to ANALYSIS_MIN_DATE_ISO so callers can't dip below the
-  // cutoff (whether by passing an older date, an empty string, or null).
-  const requestedFromISO = f.dateFrom ? new Date(f.dateFrom).toISOString() : null;
-  const effectiveFromISO = requestedFromISO && requestedFromISO > ANALYSIS_MIN_DATE_ISO
-    ? requestedFromISO
-    : ANALYSIS_MIN_DATE_ISO;
-  q = q.gte('intercom_created_at', effectiveFromISO);
-  if (f.dateTo) {
-    const end = new Date(f.dateTo);
-    end.setUTCDate(end.getUTCDate() + 1);
-    q = q.lt('intercom_created_at', end.toISOString());
+  // pendingAge mirrors the global pending stat in app/api/dashboard, which
+  // ignores the date range entirely. The dashboard still forwards dateFrom
+  // /dateTo here so the overlay can use them in the CSV filename — but they
+  // must NOT be applied as predicates, otherwise the modal undercounts.
+  if (!f.pendingAge) {
+    // Floor dateFrom to ANALYSIS_MIN_DATE_ISO so callers can't dip below the
+    // cutoff (whether by passing an older date, an empty string, or null).
+    const requestedFromISO = f.dateFrom ? new Date(f.dateFrom).toISOString() : null;
+    const effectiveFromISO = requestedFromISO && requestedFromISO > ANALYSIS_MIN_DATE_ISO
+      ? requestedFromISO
+      : ANALYSIS_MIN_DATE_ISO;
+    q = q.gte('intercom_created_at', effectiveFromISO);
+    if (f.dateTo) {
+      const end = new Date(f.dateTo);
+      end.setUTCDate(end.getUTCDate() + 1);
+      q = q.lt('intercom_created_at', end.toISOString());
+    }
   }
   // Use Supabase's native .in() helper for the all-named case — passing the
   // values as a JS array lets the client serialise them safely (handles names

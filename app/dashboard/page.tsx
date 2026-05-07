@@ -539,12 +539,14 @@ export default function DashboardPage() {
     const filters: Record<string, string | string[]> = {};
     // Pending Action cards drill into the GLOBAL pending bucket — the card
     // stat is computed without any dashboard filters (see app/api/dashboard
-    // pendingUnder24h/pendingOver24h). The modal must match, otherwise the
-    // user sees e.g. card=221 but modal=0 when their date filter is "today".
+    // pendingUnder24h/pendingOver24h). The modal data must match, otherwise
+    // the user sees e.g. card=221 but modal=0 when their date is "today".
+    // The date is still forwarded for filename use; the DB layer skips
+    // applying it as a predicate when pending_age is set.
     const isGlobalDrill = 'pending_age' in extra;
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo)   filters.dateTo   = dateTo;
     if (!isGlobalDrill) {
-      if (dateFrom)        filters.dateFrom        = dateFrom;
-      if (dateTo)          filters.dateTo          = dateTo;
       // Forward each multi-select as an array (or a plain string when exactly
       // one value is selected). The overlay sends arrays through as repeated
       // query params; /api/conversations reads them via getAll().
