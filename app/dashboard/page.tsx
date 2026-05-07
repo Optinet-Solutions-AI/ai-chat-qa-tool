@@ -46,6 +46,7 @@ interface WeeklyIssueHeatmap {
 interface DailyHourlyIssueHeatmap {
   dates: string[];
   cells: { date: string; hour: number; count: number }[];
+  topIssues: string[];
 }
 
 interface DashboardData {
@@ -577,7 +578,13 @@ export default function DashboardPage() {
       return v !== '';
     });
     let title = 'Conversations';
-    if (extraEntries.length > 0) {
+    const hourExtra = extra.hour;
+    const dateExtra = extra.dateFrom;
+    if (hourExtra != null && hourExtra !== '' && typeof dateExtra === 'string' && dateExtra) {
+      // Daily & Hourly Heat Map cell drill — title shows the exact UTC hour.
+      const h = String(hourExtra).padStart(2, '0');
+      title = `Issues on ${dateExtra} at ${h}:00 UTC`;
+    } else if (extraEntries.length > 0) {
       const [key, val] = extraEntries[0];
       const label = OVERLAY_LABELS[key] ?? key;
       if (val === 'true' && key === 'alert_worthy') title = 'Alert-worthy Conversations';
@@ -1325,7 +1332,15 @@ export default function DashboardPage() {
                 palette="magenta"
                 cellHeight="22px"
                 rowLabelWidth="80px"
-                onCellClick={(rowKey, _colKey, _v, e) => navToConversations({ dateFrom: rowKey, dateTo: rowKey }, e)}
+                onCellClick={(rowKey, colKey, _v, e) => navToConversations(
+                  {
+                    dateFrom: rowKey,
+                    dateTo: rowKey,
+                    hour: colKey,
+                    issue_item: data.dailyHourlyIssueHeatmap.topIssues,
+                  },
+                  e,
+                )}
               />
             )}
           </Section>

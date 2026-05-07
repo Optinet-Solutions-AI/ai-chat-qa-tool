@@ -436,6 +436,7 @@ export interface ConversationFilters {
   player_country?: string | string[];
   dateFrom?: string;
   dateTo?: string;
+  hour?: string | number;              // UTC hour 0-23; narrows date range to that hour
   analyzed?: boolean;
   alert_worthy?: boolean;
   asana_ticketed?: boolean;            // narrows to rows that have a live Asana task
@@ -480,6 +481,7 @@ export async function loadConversations(
   query = applyConversationDbFilters(query, {
     dateFrom:       filters.dateFrom,
     dateTo:         filters.dateTo,
+    hour:           filters.hour,
     brand:          filters.brand,
     agent:          filters.agent_name,
     accountManager: filters.account_manager,
@@ -518,6 +520,7 @@ function buildJsonFilterBaseQuery(fields: string, filters: ConversationFilters):
   q = applyConversationDbFilters(q, {
     dateFrom:       filters.dateFrom,
     dateTo:         filters.dateTo,
+    hour:           filters.hour,
     brand:          filters.brand,
     agent:          filters.agent_name,
     accountManager: filters.account_manager,

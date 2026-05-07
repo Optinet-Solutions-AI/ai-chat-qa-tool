@@ -675,10 +675,14 @@ export async function GET(req: NextRequest) {
     type DailyHourlyIssueHeatmapOut = {
       dates: string[];
       cells: { date: string; hour: number; count: number }[];
+      // The display labels of the issues whose conversations are aggregated
+      // into the cells. Sent so the cell drill-down can apply the same
+      // issue_item filter and the modal count matches the cell count exactly.
+      topIssues: string[];
     };
     let dissatisfactionTrend: DissatisfactionTrendOut = { issues: [], data: [] };
     let weeklyIssueHeatmap: WeeklyIssueHeatmapOut = { days: [], issues: [] };
-    let dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmapOut = { dates: [], cells: [] };
+    let dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmapOut = { dates: [], cells: [], topIssues: [] };
 
     if (wantGlobal && widerRowsPromise) {
       const widerDbRows = await widerRowsPromise;
@@ -854,7 +858,7 @@ export async function GET(req: NextRequest) {
     // Top 5 issues over the 30-day window (or selected issues if filter active),
     // counts per (date, hour) summed across those issues at the conversation
     // level — a chat that flags multiple top-5 issues counts once per cell.
-    const issueTotalAgg: Record<string, { total: number }> = {};
+    const issueTotalAgg: Record<string, { total: number; labelCounts: Record<string, number> }> = {};
     for (const p of widerFiltered) {
       const seen = new Set<string>();
       for (const it of p.items) {
@@ -864,16 +868,19 @@ export async function GET(req: NextRequest) {
         const key = normalizeIssueKey(clean);
         if (seen.has(key)) continue;
         seen.add(key);
-        if (!issueTotalAgg[key]) issueTotalAgg[key] = { total: 0 };
+        if (!issueTotalAgg[key]) issueTotalAgg[key] = { total: 0, labelCounts: {} };
         issueTotalAgg[key].total += 1;
+        issueTotalAgg[key].labelCounts[clean] = (issueTotalAgg[key].labelCounts[clean] ?? 0) + 1;
       }
     }
-    const dailyHourlyTopKeys = new Set(
-      Object.entries(issueTotalAgg)
-        .sort(([, a], [, b]) => b.total - a.total)
-        .slice(0, hasIssueFilter ? Object.keys(issueTotalAgg).length : 5)
-        .map(([k]) => k)
-    );
+    const dailyHourlyTopEntries = Object.entries(issueTotalAgg)
+      .sort(([, a], [, b]) => b.total - a.total)
+      .slice(0, hasIssueFilter ? Object.keys(issueTotalAgg).length : 5);
+    const dailyHourlyTopKeys = new Set(dailyHourlyTopEntries.map(([k]) => k));
+    const dailyHourlyTopLabels = dailyHourlyTopEntries.map(([, v]) => {
+      const [bestLabel] = Object.entries(v.labelCounts).sort((a, b) => b[1] - a[1])[0];
+      return bestLabel;
+    });
     const dailyHourlyCells: Record<string, number> = {};
     for (const p of widerFiltered) {
       if (!p.iso) continue;
@@ -900,6 +907,7 @@ export async function GET(req: NextRequest) {
     dailyHourlyIssueHeatmap = {
       dates: firstDailyIdx <= 0 ? days30 : days30.slice(firstDailyIdx),
       cells: allDailyHourlyCells,
+      topIssues: dailyHourlyTopLabels,
     };
     } // end if (wantGlobal && widerRowsPromise)
 

@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
   setMulti('player_country',           multi('player_country'));
   if (sp.get('dateFrom'))                 filters.dateFrom                 = sp.get('dateFrom')!;
   if (sp.get('dateTo'))                   filters.dateTo                   = sp.get('dateTo')!;
+  if (sp.get('hour'))                     filters.hour                     = sp.get('hour')!;
   if (sp.get('analyzed') !== null && sp.get('analyzed') !== '')
     filters.analyzed = sp.get('analyzed') === 'true';
   if (sp.get('alert_worthy') === 'true')  filters.alert_worthy             = true;

@@ -220,6 +220,10 @@ export function rowPassesCategoryIssueFilter(
 export interface DbFilterInputs {
   dateFrom?: string | null;
   dateTo?:   string | null;
+  // UTC hour 0-23. When set together with dateFrom, narrows the predicate to
+  // that single hour of that single UTC day (used by the Daily & Hourly Issue
+  // Heat Map drill-down so the modal count matches the cell count exactly).
+  hour?:     string | number | null;
   brand?:    string | string[] | null;
   agent?:    string | string[] | null;
   accountManager?: string | string[] | null;
@@ -262,17 +266,36 @@ export function applyConversationDbFilters(q: AnySupabaseQuery, f: DbFilterInput
   // /dateTo here so the overlay can use them in the CSV filename — but they
   // must NOT be applied as predicates, otherwise the modal undercounts.
   if (!f.pendingAge) {
-    // Floor dateFrom to ANALYSIS_MIN_DATE_ISO so callers can't dip below the
-    // cutoff (whether by passing an older date, an empty string, or null).
-    const requestedFromISO = f.dateFrom ? new Date(f.dateFrom).toISOString() : null;
-    const effectiveFromISO = requestedFromISO && requestedFromISO > ANALYSIS_MIN_DATE_ISO
-      ? requestedFromISO
-      : ANALYSIS_MIN_DATE_ISO;
-    q = q.gte('intercom_created_at', effectiveFromISO);
-    if (f.dateTo) {
-      const end = new Date(f.dateTo);
-      end.setUTCDate(end.getUTCDate() + 1);
+    const hourNum = (() => {
+      if (f.hour == null || f.hour === '') return null;
+      const n = typeof f.hour === 'string' ? parseInt(f.hour, 10) : f.hour;
+      return Number.isFinite(n) && n >= 0 && n < 24 ? n : null;
+    })();
+
+    if (hourNum != null && f.dateFrom) {
+      // Hour-precise UTC range — the heat map cell drill-down passes hour=H
+      // so the modal shows exactly the conversations counted in that cell.
+      const start = new Date(`${f.dateFrom.slice(0, 10)}T00:00:00.000Z`);
+      start.setUTCHours(hourNum);
+      const end = new Date(start);
+      end.setUTCHours(start.getUTCHours() + 1);
+      const startISO = start.toISOString();
+      const effectiveStart = startISO > ANALYSIS_MIN_DATE_ISO ? startISO : ANALYSIS_MIN_DATE_ISO;
+      q = q.gte('intercom_created_at', effectiveStart);
       q = q.lt('intercom_created_at', end.toISOString());
+    } else {
+      // Floor dateFrom to ANALYSIS_MIN_DATE_ISO so callers can't dip below the
+      // cutoff (whether by passing an older date, an empty string, or null).
+      const requestedFromISO = f.dateFrom ? new Date(f.dateFrom).toISOString() : null;
+      const effectiveFromISO = requestedFromISO && requestedFromISO > ANALYSIS_MIN_DATE_ISO
+        ? requestedFromISO
+        : ANALYSIS_MIN_DATE_ISO;
+      q = q.gte('intercom_created_at', effectiveFromISO);
+      if (f.dateTo) {
+        const end = new Date(f.dateTo);
+        end.setUTCDate(end.getUTCDate() + 1);
+        q = q.lt('intercom_created_at', end.toISOString());
+      }
     }
   }
   // Use Supabase's native .in() helper for the all-named case — passing the
