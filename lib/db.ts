@@ -438,6 +438,10 @@ export interface ConversationFilters {
   dateTo?: string;
   hour?: string | number;              // UTC hour 0-23; narrows date range to that hour
   analyzed?: boolean;
+  // Narrows analyzed rows to those whose summary JSON has at least one
+  // result with both a real category AND a real item (mirrors the
+  // dashboard's "Categorized" stat). Implies analyzed=true.
+  categorized?: boolean;
   alert_worthy?: boolean;
   asana_ticketed?: boolean;            // narrows to rows that have a live Asana task
   asana_status?: 'open' | 'closed';    // implies asana_ticketed=true
@@ -462,7 +466,7 @@ export function needsJsonFilter(filters: ConversationFilters): boolean {
   return hasFilter(filters.resolution_status) || hasFilter(filters.dissatisfaction_severity) ||
          hasFilter(filters.issue_category)    || hasFilter(filters.issue_item) ||
          hasFilter(filters.language)          || hasFilter(filters.vip_level) ||
-         hasFilter(filters.segment);
+         hasFilter(filters.segment)           || filters.categorized != null;
 }
 
 export async function loadConversations(
@@ -633,6 +637,22 @@ export async function loadConversationsWithJsonFilter(
   if (items.length > 0) {
     const matcher = buildIssueMatcher(items);
     filtered = filtered.filter(({ summary }) => summary.results.some((x) => matcher(x.item)));
+  }
+
+  // Categorized = at least one results entry has both a real category AND a
+  // real item (neither null nor the literal "Unknown" the AI sometimes emits).
+  // Mirrors the dashboard's "Categorized" stat 1:1 so the card and the
+  // drill-down list never disagree.
+  if (filters.categorized != null) {
+    const want = filters.categorized;
+    filtered = filtered.filter(({ summary }) => {
+      const hasCat = summary.results.some((x) => {
+        const cat = x.category ?? 'Unknown';
+        const itm = x.item ?? 'Unknown';
+        return cat !== 'Unknown' && itm !== 'Unknown';
+      });
+      return hasCat === want;
+    });
   }
 
   const segs = asArray(filters.segment);

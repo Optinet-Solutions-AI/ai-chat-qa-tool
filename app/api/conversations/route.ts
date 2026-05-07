@@ -47,6 +47,8 @@ export async function GET(req: NextRequest) {
   if (sp.get('hour'))                     filters.hour                     = sp.get('hour')!;
   if (sp.get('analyzed') !== null && sp.get('analyzed') !== '')
     filters.analyzed = sp.get('analyzed') === 'true';
+  if (sp.get('categorized') !== null && sp.get('categorized') !== '')
+    filters.categorized = sp.get('categorized') === 'true';
   if (sp.get('alert_worthy') === 'true')  filters.alert_worthy             = true;
   if (sp.get('asana_ticketed') === 'true') filters.asana_ticketed          = true;
   const status = sp.get('asana_status');

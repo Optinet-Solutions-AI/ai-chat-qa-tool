@@ -1046,10 +1046,24 @@ export async function GET(req: NextRequest) {
       const overviewTotal     = hasInMemoryFilter ? filteredRows.length : total;
       const overviewUnanalyzed = hasInMemoryFilter ? 0 : total - analyzed;
 
+      // Categorized = analyzed rows where the AI emitted at least one result with
+      // both a real category and a real item (neither defaulted to "Unknown").
+      // Derive uncategorized from overviewAnalyzed so the two always sum to it,
+      // even if filteredParsed.length and the DB count drift by a row or two.
+      let categorized = 0;
+      for (const p of filteredParsed) {
+        if (p.items.some((x) => x.item !== 'Unknown' && x.category !== 'Unknown')) {
+          categorized++;
+        }
+      }
+      const uncategorized = Math.max(0, overviewAnalyzed - categorized);
+
       responseBody.overview = {
         total:      overviewTotal,
         analyzed:   overviewAnalyzed,
         unanalyzed: overviewUnanalyzed,
+        categorized,
+        uncategorized,
         alertWorthy: overviewAlertWorthy,
         analyzedPct: overviewTotal > 0 ? Math.round((overviewAnalyzed / overviewTotal) * 100) : 0,
       };

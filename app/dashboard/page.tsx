@@ -15,6 +15,8 @@ interface Overview {
   total: number;
   analyzed: number;
   unanalyzed: number;
+  categorized: number;
+  uncategorized: number;
   alertWorthy: number;
   analyzedPct: number;
 }
@@ -227,6 +229,7 @@ const OVERLAY_LABELS: Record<string, string> = {
   player_country:           'Country',
   dateFrom:                 'Date',
   analyzed:                 'Analyzed',
+  categorized:              'Categorized',
   alert_worthy:             'Alert-worthy',
 };
 
@@ -590,6 +593,8 @@ export default function DashboardPage() {
       if (val === 'true' && key === 'alert_worthy') title = 'Alert-worthy Conversations';
       else if (val === 'true' && key === 'analyzed') title = 'Analyzed Conversations';
       else if (val === 'false' && key === 'analyzed') title = 'Unanalyzed Conversations';
+      else if (val === 'true' && key === 'categorized') title = 'Categorized Conversations';
+      else if (val === 'false' && key === 'categorized') title = 'Uncategorized Conversations';
       else if (val === 'true' && key === 'asana_ticketed') title = 'Escalations';
       else if (val === 'open' && key === 'asana_status')   title = 'Open Escalations';
       else if (val === 'closed' && key === 'asana_status') title = 'Resolved Escalations';
@@ -988,7 +993,7 @@ export default function DashboardPage() {
       {!loading && !error && data && (
         <>
           {/* Stat cards — Conversation volume */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard
               label="Total Conversations"
               value={data.overview.total}
@@ -1003,6 +1008,20 @@ export default function DashboardPage() {
               accent="teal"
               icon="check"
               onClick={(e) => navToConversations({ analyzed: 'true' }, e)}
+            />
+            <StatCard
+              label="Categorized"
+              value={data.overview.categorized}
+              accent="violet"
+              icon="check"
+              onClick={(e) => navToConversations({ categorized: 'true' }, e)}
+            />
+            <StatCard
+              label="Uncategorized"
+              value={data.overview.uncategorized}
+              accent="rose"
+              icon="alarm"
+              onClick={(e) => navToConversations({ categorized: 'false' }, e)}
             />
             <StatCard
               label="Unanalyzed"
