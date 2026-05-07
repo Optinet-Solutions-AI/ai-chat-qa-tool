@@ -513,6 +513,12 @@ export async function GET(req: NextRequest) {
     const allItems = filteredParsed.flatMap((p) => p.items);
     const itemAgg: Record<string, { count: number; category: string; labelCounts: Record<string, number> }> = {};
     for (const { item, category } of allItems) {
+      // A conversation can carry items across multiple categories; the
+      // conversation-level filter at L391 keeps the row if *any* category
+      // matches, so we re-check at the item level here. Without this, picking
+      // "Account Closure & Self-Exclusion Requests" would leak Payments/Bonus
+      // items from the same conversation into Top 5 Issues.
+      if (hasCategoryFilter && !matchesCategory(category)) continue;
       const clean = stripItemNum(item);
       if (!clean) continue;
       const key = normalizeIssueKey(clean);
