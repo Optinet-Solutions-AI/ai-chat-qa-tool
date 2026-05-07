@@ -1121,26 +1121,29 @@ export function renderSnapshotHTML(data: SnapshotData): string {
     <table cellpadding="0" cellspacing="0" border="0" width="800" style="max-width:800px;background:${COLORS.bgCard};border:1px solid ${COLORS.border};border-radius:12px;">
 
       <!-- HEADER -->
-      <!-- background-color is the solid fallback (matches the rest of the
-           card); background-image layers a radial blue glow at the top-left
-           per the mockup. Outlook desktop strips the gradient and falls
-           back to the solid color, which is fine. -->
-      <tr><td style="padding:32px 36px 24px;background-color:${COLORS.bgCard};background-image:radial-gradient(ellipse 60% 100% at 0% 0%, rgba(99,102,241,0.18), transparent 60%);font-family:Arial,Helvetica,sans-serif;">
+      <!-- Two layered gradients to match the mockup's "ambient" header:
+           (1) a wide radial blue glow originating top-left, and (2) a very
+           subtle white highlight fading from the top edge so the card feels
+           lit from above. Both sit on top of the solid bgCard color so
+           Outlook desktop (which strips gradients) still gets a clean dark
+           header. The radial is sized 100% × 130% so the glow extends well
+           past the card's height — without that the glow looks pinched. -->
+      <tr><td style="padding:32px 36px 24px;background-color:${COLORS.bgCard};background-image:radial-gradient(ellipse 100% 130% at 0% 0%, rgba(99,102,241,0.22), transparent 65%), linear-gradient(180deg, rgba(255,255,255,0.025), transparent 40%);font-family:Arial,Helvetica,sans-serif;">
         <div style="font-size:22px;font-weight:600;color:${COLORS.text1};letter-spacing:-0.02em;">QA Daily Snapshot</div>
         <div style="font-size:13px;color:${COLORS.text2};margin-top:6px;">${escapeHtml(data.targetDateLabel)} · Yesterday's data</div>
         <div style="margin-top:12px;"><span style="display:inline-block;font-size:11px;font-weight:500;color:#60a5fa;background:#1a2540;padding:4px 10px;border-radius:999px;border:1px solid #2a3960;letter-spacing:0.02em;">${escapeHtml(baselineNote)}</span></div>
       </td></tr>
 
       <!-- HEADER GLOW LINE -->
-      <!-- 1px row that replaces the header's bottom border with a glowing
-           blue gradient. background-color falls back to the standard border
-           color in clients that strip linear-gradient. The &nbsp; gives the
-           cell content so the row reliably renders at 1px in all clients. -->
+      <!-- 1px-tall divider that replaces the header's bottom border. Lower
+           alpha (0.30) so the line reads as a faint glow rather than a hard
+           blue stripe — matches the mockup. background-color falls back to
+           the standard border color in clients that strip linear-gradient. -->
       <tr><td style="padding:0;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
             <td width="36" style="line-height:1px;font-size:1px;">&nbsp;</td>
-            <td style="height:1px;line-height:1px;font-size:1px;background-color:${COLORS.border};background-image:linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.55) 50%, transparent 100%);">&nbsp;</td>
+            <td style="height:1px;line-height:1px;font-size:1px;background-color:${COLORS.border};background-image:linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.30) 50%, transparent 100%);">&nbsp;</td>
             <td width="36" style="line-height:1px;font-size:1px;">&nbsp;</td>
           </tr>
         </table>
