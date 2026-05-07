@@ -440,6 +440,7 @@ export interface ConversationFilters {
   alert_worthy?: boolean;
   asana_ticketed?: boolean;            // narrows to rows that have a live Asana task
   asana_status?: 'open' | 'closed';    // implies asana_ticketed=true
+  pending_age?: 'under_24h' | 'over_24h'; // splits the open-pending bucket; implies asana_status='open'
 }
 
 function asArray(v: string | string[] | undefined | null): string[] {
@@ -485,6 +486,7 @@ export async function loadConversations(
     country:        filters.player_country,
     asanaTicketed:  filters.asana_ticketed,
     asanaStatus:    filters.asana_status,
+    pendingAge:     filters.pending_age,
   });
   if (filters.analyzed === true)     query = query.not('summary', 'is', null);
   if (filters.analyzed === false)    query = query.is('summary', null);
@@ -522,6 +524,7 @@ function buildJsonFilterBaseQuery(fields: string, filters: ConversationFilters):
     country:        filters.player_country,
     asanaTicketed:  filters.asana_ticketed,
     asanaStatus:    filters.asana_status,
+    pendingAge:     filters.pending_age,
   });
   if (filters.alert_worthy === true) q = q.eq('is_alert_worthy', true);
   return q;

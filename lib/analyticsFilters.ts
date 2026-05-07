@@ -230,6 +230,10 @@ export interface DbFilterInputs {
   // implies asana_ticketed=true even when caller didn't pass it.
   asanaTicketed?: boolean;
   asanaStatus?:  'open' | 'closed';
+  // Splits the open-pending bucket by analyzed_at age, mirroring the
+  // pendingUnder24h / pendingOver24h stat computation in the dashboard route.
+  // Setting this implies asana_ticketed=true and asana_status='open'.
+  pendingAge?:   'under_24h' | 'over_24h';
 }
 
 function toArray(v: string | string[] | null | undefined): string[] {
@@ -320,10 +324,24 @@ export function applyConversationDbFilters(q: AnySupabaseQuery, f: DbFilterInput
   }
   // Mirror the row set that dbGetAsanaReportingMetrics uses: a "live" ticket
   // is one whose gid is set and whose task hasn't been deleted in Asana.
-  if (f.asanaTicketed || f.asanaStatus) {
+  if (f.asanaTicketed || f.asanaStatus || f.pendingAge) {
     q = q.not('asana_task_gid', 'is', null).is('asana_task_deleted_at', null);
   }
-  if (f.asanaStatus === 'open')   q = q.is('asana_completed_at', null);
-  if (f.asanaStatus === 'closed') q = q.not('asana_completed_at', 'is', null);
+  // pendingAge implies the open-pending base set (same as asana_status='open').
+  if (f.asanaStatus === 'open' || f.pendingAge) q = q.is('asana_completed_at', null);
+  if (f.asanaStatus === 'closed')               q = q.not('asana_completed_at', 'is', null);
+
+  // Bucket open-pending by analyzed_at age, matching the stat predicate:
+  //   ageMs = analyzed_at ? NOW - analyzed_at : Infinity
+  //   under_24h: ageMs < 24h   →  analyzed_at >= cutoff
+  //   over_24h:  ageMs >= 24h  →  analyzed_at < cutoff OR analyzed_at IS NULL
+  if (f.pendingAge) {
+    const cutoffISO = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    if (f.pendingAge === 'under_24h') {
+      q = q.gte('analyzed_at', cutoffISO);
+    } else {
+      q = q.or(`analyzed_at.is.null,analyzed_at.lt.${cutoffISO}`);
+    }
+  }
   return q;
 }

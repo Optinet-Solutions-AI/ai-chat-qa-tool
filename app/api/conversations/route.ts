@@ -50,6 +50,8 @@ export async function GET(req: NextRequest) {
   if (sp.get('asana_ticketed') === 'true') filters.asana_ticketed          = true;
   const status = sp.get('asana_status');
   if (status === 'open' || status === 'closed') filters.asana_status        = status;
+  const pendingAge = sp.get('pending_age');
+  if (pendingAge === 'under_24h' || pendingAge === 'over_24h') filters.pending_age = pendingAge;
 
   try {
     const result = needsJsonFilter(filters)

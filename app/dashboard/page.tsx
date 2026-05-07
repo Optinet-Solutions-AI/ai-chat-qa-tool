@@ -568,6 +568,8 @@ export default function DashboardPage() {
       else if (val === 'true' && key === 'asana_ticketed') title = 'Escalations';
       else if (val === 'open' && key === 'asana_status')   title = 'Open Escalations';
       else if (val === 'closed' && key === 'asana_status') title = 'Resolved Escalations';
+      else if (val === 'under_24h' && key === 'pending_age') title = 'Pending Action <24h';
+      else if (val === 'over_24h' && key === 'pending_age')  title = 'Pending Action >24h';
       else title = `${label}: ${val}`;
     }
 
@@ -1005,14 +1007,14 @@ export default function DashboardPage() {
               value={data.escalationStats.pendingUnder24h}
               accent="amber"
               icon="clock"
-              onClick={(e) => navToConversations({ asana_status: 'open' }, e)}
+              onClick={(e) => navToConversations({ pending_age: 'under_24h' }, e)}
             />
             <StatCard
               label="Pending Action >24h"
               value={data.escalationStats.pendingOver24h}
               accent="rose"
               icon="alarm"
-              onClick={(e) => navToConversations({ asana_status: 'open' }, e)}
+              onClick={(e) => navToConversations({ pending_age: 'over_24h' }, e)}
             />
             <StatCard
               label="Closure Rate"
