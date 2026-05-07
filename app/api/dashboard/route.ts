@@ -772,11 +772,13 @@ export async function GET(req: NextRequest) {
     })();
     const days7 = days30.slice(-7);
 
-    // ── Dissatisfaction Trend (top issues that cause dissatisfaction, 30d) ──
+    // ── Top 5 Issues trend (top issues that cause dissatisfaction, 30d) ──
     // Only conversations with a non-null severity contribute (those flagged by
-    // the AI as showing user dissatisfaction). We pick the top 3 issues from
-    // the dissatisfied subset and emit per-day counts for each — matches the
-    // 3-line line chart shown in the spec mockup.
+    // the AI as showing user dissatisfaction). We pick the top 5 issues from
+    // the dissatisfied subset and emit per-day counts for each.
+    // When category/issue filters are active, items that don't match the
+    // filter are excluded from the per-day counts — otherwise co-occurring
+    // issues from a passing conversation would render unrelated lines.
     const dissatisfiedRows = widerFiltered.filter((p) => normalizeSeverity(p.severity) != null);
     const dissatisfactionIssueAgg: Record<string, { label: string; total: number; perDate: Record<string, number>; labelCounts: Record<string, number> }> = {};
     for (const p of dissatisfiedRows) {
@@ -785,6 +787,8 @@ export async function GET(req: NextRequest) {
       const seen = new Set<string>();
       for (const it of p.items) {
         if (it.item === 'Unknown') continue;
+        if (hasCategoryFilter && !matchesCategory(it.category)) continue;
+        if (hasIssueFilter    && !matchesIssue(it.item)) continue;
         const clean = stripItemNum(it.item);
         if (!clean) continue;
         const key = normalizeIssueKey(clean);
@@ -796,7 +800,7 @@ export async function GET(req: NextRequest) {
         dissatisfactionIssueAgg[key].labelCounts[clean] = (dissatisfactionIssueAgg[key].labelCounts[clean] ?? 0) + 1;
       }
     }
-    const trendTopN = hasIssueFilter ? Object.keys(dissatisfactionIssueAgg).length : 3;
+    const trendTopN = hasIssueFilter ? Object.keys(dissatisfactionIssueAgg).length : 5;
     const trendTopIssues = Object.values(dissatisfactionIssueAgg)
       .sort((a, b) => b.total - a.total)
       .slice(0, trendTopN)

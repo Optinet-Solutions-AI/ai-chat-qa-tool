@@ -1207,11 +1207,11 @@ export default function DashboardPage() {
             </Section>
           </div>
 
-          {/* Row: Dissatisfaction Trend + Weekly Issue Heat Map ─────────── */}
+          {/* Row: Top 5 Issues + Weekly Issue Heat Map ─────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Dissatisfaction Trend — top 3 issues over last 30 days, dissatisfied
+            {/* Top 5 Issues — top 5 issues over last 30 days, dissatisfied
                 conversations only. */}
-            <Section title="Dissatisfaction Trend">
+            <Section title="Top 5 Issues">
               {data.dissatisfactionTrend.issues.length === 0 ? (
                 <Empty message="No dissatisfaction data in the last 30 days" />
               ) : (
