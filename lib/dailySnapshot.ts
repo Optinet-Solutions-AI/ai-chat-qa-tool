@@ -1117,7 +1117,7 @@ export function renderSnapshotHTML(data: SnapshotData): string {
       <tr><td style="padding:32px 36px 24px;border-bottom:1px solid ${COLORS.border};font-family:Arial,Helvetica,sans-serif;">
         <div style="font-size:22px;font-weight:600;color:${COLORS.text1};letter-spacing:-0.02em;">QA Daily Snapshot</div>
         <div style="font-size:13px;color:${COLORS.text2};margin-top:6px;">${escapeHtml(data.targetDateLabel)} · Yesterday's data</div>
-        <div style="margin-top:12px;"><span style="display:inline-block;font-size:11px;font-weight:500;color:${COLORS.link};background:${COLORS.bgTile};padding:4px 10px;border-radius:999px;border:1px solid ${COLORS.border};letter-spacing:0.02em;">${escapeHtml(baselineNote)}</span></div>
+        <div style="margin-top:12px;"><span style="display:inline-block;font-size:11px;font-weight:500;color:#60a5fa;background:#1a2540;padding:4px 10px;border-radius:999px;border:1px solid #2a3960;letter-spacing:0.02em;">${escapeHtml(baselineNote)}</span></div>
       </td></tr>
 
       <!-- GLANCE -->
