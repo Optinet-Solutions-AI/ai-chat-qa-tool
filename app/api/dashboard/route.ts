@@ -926,13 +926,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── Top 5 Issue Spikes — fixed window, ignores all filters ───────────
+    // ── Top 5 Issue Spikes — fixed 2-day window, honours non-date filters ─
     // Compares the two most recent COMPLETED UTC days (so today's partial day
     // is excluded). The bars in the UI are labelled "Today" (= the more recent
-    // completed day) and "Yesterday" (= the day before). Per the spec this
-    // widget is permanently fixed and never honours dateFrom/dateTo or any of
-    // the brand/agent/segment/severity/category/issue filters — it's an
-    // operational early-warning view of the last 24h vs the previous 24h.
+    // completed day) and "Yesterday" (= the day before). The yesterday-vs-day-
+    // before window is fixed by design (this is the chart's whole purpose), but
+    // every other dashboard filter — brand/agent/AM/country at the DB level and
+    // category/issue/severity/resolution/language/segment/vipLevel in memory —
+    // is applied so the user can scope the spike view to e.g. only VIP players
+    // or only severity-1 issues.
     type IssueSpikeOut = { issue: string; today: number; yesterday: number };
     let issueSpikes: IssueSpikeOut[] = [];
     if (wantGlobal) {
@@ -942,34 +944,108 @@ export async function GET(req: NextRequest) {
       const dayNm1StartUTC = new Date(utcStartOfToday); dayNm1StartUTC.setUTCDate(dayNm1StartUTC.getUTCDate() - 2);
       const dayNStrISO = dayNStartUTC.toISOString().slice(0, 10);
 
-      const spikeRows: Array<{ summary: string | null; intercom_created_at: string }> = [];
+      // DB-level filters: brand/agent/AM/country. Date filter is intentionally
+      // omitted — the spike window is fixed to the last 2 completed UTC days.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const applySpikeDbFilters = (q: any) => applyConversationDbFilters(q, {
+        brand:          brands,
+        agent:          agents,
+        accountManager: accountManagers,
+        country:        countries,
+      });
+
+      type SpikeRow = {
+        summary: string | null;
+        intercom_created_at: string;
+        dissatisfaction_severity: string | null;
+        language: string | null;
+        resolution_status: string | null;
+        player_tags: string[] | null;
+        player_segments: string[] | null;
+        player_companies: { name: string }[] | null;
+        tags: string[] | null;
+        player_custom_attributes: Record<string, unknown> | null;
+      };
+      const spikeRows: SpikeRow[] = [];
       let spikeFrom = 0;
       while (true) {
-        const { data: page } = await supabase
-          .from('conversations')
-          .select('summary, intercom_created_at')
-          .not('summary', 'is', null)
-          .gte('intercom_created_at', dayNm1StartUTC.toISOString())
-          .lt ('intercom_created_at', utcStartOfToday.toISOString())
-          .order('intercom_created_at', { ascending: false })
-          .range(spikeFrom, spikeFrom + PAGE_SIZE - 1) as {
-            data: Array<{ summary: string | null; intercom_created_at: string }> | null;
-          };
+        const { data: page } = await applySpikeDbFilters(
+          supabase
+            .from('conversations')
+            .select('summary, intercom_created_at, dissatisfaction_severity, language, resolution_status, player_tags, player_segments, player_companies, tags, player_custom_attributes')
+            .not('summary', 'is', null)
+            .gte('intercom_created_at', dayNm1StartUTC.toISOString())
+            .lt ('intercom_created_at', utcStartOfToday.toISOString())
+            .order('intercom_created_at', { ascending: false })
+            .range(spikeFrom, spikeFrom + PAGE_SIZE - 1)
+        ) as { data: SpikeRow[] | null };
         if (!page || page.length === 0) break;
         spikeRows.push(...page);
         if (page.length < PAGE_SIZE) break;
         spikeFrom += PAGE_SIZE;
       }
 
+      // Resolve in-memory filter targets once. Mirrors the predicates used by
+      // the main scoped pipeline so the spike chart stays consistent with the
+      // overview counts when the same filters are applied.
+      const severityTargets   = hasSeverityFilter   ? new Set(severities.map((s) => normalizeSeverity(s)).filter((s): s is string => !!s)) : null;
+      const resolutionTargets = hasResolutionFilter ? new Set(resolutions.map((r) => r.toLowerCase())) : null;
+      const wantUnresolved    = resolutionTargets ? resolutionTargets.has('unresolved') : false;
+      const languageTargets   = hasLanguageFilter   ? new Set(languages.map((l) => l.toLowerCase())) : null;
+      const wantUnknownLang   = languageTargets ? languageTargets.has('unknown') : false;
+      const segmentTargets    = hasSegmentFilter    ? new Set(segments.map((s) => parseSegmentFilter(s)).filter((s): s is 'VIP' | 'NON-VIP' | 'SoftSwiss' => s != null)) : null;
+      const vipLevelTargets   = hasVipLevelFilter   ? new Set(vipLevels.map((v) => parseVipLevelFilter(v)).filter((n): n is number => n != null)) : null;
+
       type SpikeAgg = { label: string; today: number; yesterday: number; labelCounts: Record<string, number> };
       const spikeAgg: Record<string, SpikeAgg> = {};
       for (const r of spikeRows) {
         const isDayN = r.intercom_created_at.slice(0, 10) === dayNStrISO;
         const summary = parseAnalysisSummary(r.summary);
+
+        const playerAttrs = {
+          player_tags:              r.player_tags ?? [],
+          player_segments:          r.player_segments ?? [],
+          player_companies:         r.player_companies ?? [],
+          tags:                     r.tags ?? [],
+          player_custom_attributes: r.player_custom_attributes ?? null,
+        };
+        const rowSeverity = r.dissatisfaction_severity ?? summary.dissatisfaction_severity ?? null;
+        const rowLanguage = r.language ?? summary.language ?? null;
+        const rowSegment  = getSegment(playerAttrs);
+        const rowVipLevel = getVipLevelNum(playerAttrs);
+        const rowCategories = summary.results.map((x) => displayCategory(x.category ?? 'Unknown'));
+
+        // Conversation-level filters: skip the whole row if it doesn't match.
+        if (hasCategoryFilter && !rowCategories.some((c) => matchesCategory(c))) continue;
+        if (hasIssueFilter    && !summary.results.some((x) => matchesIssue(x.item ?? ''))) continue;
+        if (severityTargets) {
+          const norm = normalizeSeverity(rowSeverity);
+          if (norm == null || !severityTargets.has(norm)) continue;
+        }
+        if (resolutionTargets) {
+          const val = r.resolution_status?.trim().toLowerCase();
+          if (!val || val === 'unknown') {
+            if (!wantUnresolved) continue;
+          } else if (!resolutionTargets.has(val)) continue;
+        }
+        if (languageTargets) {
+          const lang = rowLanguage?.trim().toLowerCase();
+          if (!lang) {
+            if (!wantUnknownLang) continue;
+          } else if (!languageTargets.has(lang)) continue;
+        }
+        if (segmentTargets   && (rowSegment  == null || !segmentTargets.has(rowSegment)))   continue;
+        if (vipLevelTargets  && (rowVipLevel == null || !vipLevelTargets.has(rowVipLevel))) continue;
+
         // Dedup per row: a single conversation flagging the same issue twice
         // shouldn't double-count — matches how topItems is computed.
         const seenKeys = new Set<string>();
         for (const it of summary.results) {
+          // When category/issue filters are active, exclude items that don't
+          // match — otherwise co-occurring issues from a passing conversation
+          // would show up alongside the filtered ones.
+          if (hasCategoryFilter && !matchesCategory(it.category ?? '')) continue;
+          if (hasIssueFilter    && !matchesIssue(it.item ?? '')) continue;
           const clean = stripItemNum(it.item ?? '');
           if (!clean) continue;
           const key = normalizeIssueKey(clean);

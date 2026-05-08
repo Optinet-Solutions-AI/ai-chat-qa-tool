@@ -728,6 +728,7 @@ export default function DashboardPage() {
     categories.forEach((c)      => params.append('category',       c));
     issues.forEach((i)          => params.append('issue',          i));
     severities.forEach((s)      => params.append('severity',       s));
+    resolutions.forEach((r)     => params.append('resolution',     r));
 
     const cacheKey = params.toString();
     const cached = force ? null : getCachedGlobal(cacheKey);
@@ -756,7 +757,7 @@ export default function DashboardPage() {
     } finally {
       if (!signal?.aborted) setGlobalRefreshing(false);
     }
-  }, [brands, agents, accountManagers, segments, vipLevels, languages, countries, categories, issues, severities]);
+  }, [brands, agents, accountManagers, segments, vipLevels, languages, countries, categories, issues, severities, resolutions]);
 
   // Two effects with distinct dependency lists — that's the whole point of the
   // split. Changing only the date filter recreates fetchScoped (causing a
@@ -1152,7 +1153,9 @@ export default function DashboardPage() {
             </Section>
 
             {/* Top 5 Issue Spikes — fixed last-2-completed-days comparison.
-                Per spec: never affected by global filters. */}
+                The yesterday-vs-day-before window is fixed (the chart's whole
+                purpose), but every non-date filter is honoured so the spike
+                view can be scoped to brand/agent/segment/severity/etc. */}
             <Section title="Top 5 Issue Spikes - Yesterday vs Day Before">
               {data.issueSpikes.length === 0 ? (
                 <Empty message="Not enough data for the last 2 completed days" />
