@@ -552,21 +552,38 @@ export async function GET(req: NextRequest) {
 
     // ── Weekly Issue Heat Map (top 5 issues × day-of-week) ───────────────
     // Aggregates over the user's selected date range, accumulating each
-    // weekday across all matching weeks. Columns are ordered with today's
-    // weekday on the right so the layout stays familiar as the date rolls.
+    // weekday across all matching weeks. When the range is narrower than 7
+    // days the window backfills to dateTo - 6 with an extra DB pull so the
+    // heatmap always shows a full week of context. Columns are ordered with
+    // today's weekday on the right.
     type WeeklyIssueHeatmapOut = {
       days: { dow: number; label: string }[];
       issues: { issue: string; counts: number[] }[];
     };
     const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const heatmapTodayUTC = new Date().toISOString().slice(0, 10);
+    const heatmapTo = (dateTo && dateTo < heatmapTodayUTC) ? dateTo : heatmapTodayUTC;
+    const heatmapFromCandidate = (() => {
+      const d = new Date(heatmapTo + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 6);
+      return d.toISOString().slice(0, 10);
+    })();
+    // Floor at the epoch when dateFrom is null so filteredParsed is never
+    // clipped — "no filter" should still aggregate over all loaded data.
+    const heatmapFromFloor = dateFrom ?? '1970-01-01';
+    const heatmapFrom = heatmapFromFloor < heatmapFromCandidate ? heatmapFromFloor : heatmapFromCandidate;
+    const heatmapNeedsExtraFetch = wantScoped && dateFrom != null && dateFrom > heatmapFrom;
     const todayDow = new Date().getUTCDay();
     const dowOrder = Array.from({ length: 7 }, (_, i) => (todayDow - 6 + i + 7) % 7);
     const weeklyAgg: Record<string, { label: string; total: number; perDow: number[]; labelCounts: Record<string, number> }> = {};
-    for (const p of filteredParsed) {
-      if (!p.iso) continue;
-      const dow = new Date(p.iso).getUTCDay();
+
+    const accumulateHeatmap = (iso: string, items: { category: string; item: string }[]) => {
+      if (!iso) return;
+      const dateStr = iso.slice(0, 10);
+      if (dateStr < heatmapFrom || dateStr > heatmapTo) return;
+      const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
       const seen = new Set<string>();
-      for (const it of p.items) {
+      for (const it of items) {
         if (it.item === 'Unknown') continue;
         const clean = stripItemNum(it.item);
         if (!clean) continue;
@@ -578,7 +595,91 @@ export async function GET(req: NextRequest) {
         weeklyAgg[key].perDow[dow] += 1;
         weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
       }
+    };
+
+    for (const p of filteredParsed) accumulateHeatmap(p.iso, p.items);
+
+    if (heatmapNeedsExtraFetch) {
+      // Fetch the [heatmapFrom, dateFrom) backfill slice with the same DB
+      // filters; mirror the in-memory filter cascade so the extra rows obey
+      // the same category/issue/severity/etc. constraints as filteredParsed.
+      const extraFromISO = new Date(heatmapFrom + 'T00:00:00Z').toISOString();
+      const extraToISO   = new Date(dateFrom! + 'T00:00:00.000Z').toISOString();
+      const extraRows: Array<Record<string, unknown>> = [];
+      let idx = 0;
+      while (true) {
+        const { data: page } = await applyConversationDbFilters(
+          supabase
+            .from('conversations')
+            .select('summary, language, intercom_created_at, dissatisfaction_severity, resolution_status, player_tags, player_segments, player_companies, tags, player_custom_attributes')
+            .not('summary', 'is', null)
+            .gte('intercom_created_at', extraFromISO)
+            .lt('intercom_created_at', extraToISO)
+            .order('intercom_created_at', { ascending: false })
+            .range(idx, idx + PAGE_SIZE - 1),
+          {
+            brand:          brands,
+            agent:          agents,
+            accountManager: accountManagers,
+            country:        countries,
+          },
+        ) as { data: Array<Record<string, unknown>> | null };
+        if (!page || page.length === 0) break;
+        extraRows.push(...page);
+        if (page.length < PAGE_SIZE) break;
+        idx += PAGE_SIZE;
+      }
+
+      const severityTargets = new Set(severities.map((s) => normalizeSeverity(s)).filter((s): s is string => !!s));
+      const resolutionTargets = new Set(resolutions.map((r) => r.toLowerCase()));
+      const wantUnresolved = resolutionTargets.has('unresolved');
+      const languageTargets = new Set(languages.map((l) => l.toLowerCase()));
+      const wantUnknownLang = languageTargets.has('unknown');
+      const segmentTargets = new Set(segments.map((s) => parseSegmentFilter(s)).filter((s): s is 'VIP' | 'NON-VIP' | 'SoftSwiss' => s != null));
+      const vipLevelTargets = new Set(vipLevels.map((v) => parseVipLevelFilter(v)).filter((n): n is number => n != null));
+
+      for (const r of extraRows) {
+        const summary = parseAnalysisSummary(r.summary as string | null);
+        const playerAttrs = {
+          player_tags:              (r.player_tags as string[] | null) ?? [],
+          player_segments:          (r.player_segments as string[] | null) ?? [],
+          player_companies:         (r.player_companies as { name: string }[] | null) ?? [],
+          tags:                     (r.tags as string[] | null) ?? [],
+          player_custom_attributes: (r.player_custom_attributes as Record<string, unknown> | null) ?? null,
+        };
+        const cats = summary.results.map((x) => displayCategory(x.category ?? 'Unknown'));
+        const items = summary.results.map((x) => ({ category: displayCategory(x.category ?? 'Unknown'), item: x.item ?? 'Unknown' }));
+
+        if (hasCategoryFilter && !cats.some((c) => matchesCategory(c))) continue;
+        if (hasIssueFilter && !items.some((x) => matchesIssue(x.item))) continue;
+        if (hasSeverityFilter) {
+          const sev = (r.dissatisfaction_severity as string | null) ?? summary.dissatisfaction_severity ?? null;
+          const norm = normalizeSeverity(sev);
+          if (norm == null || !severityTargets.has(norm)) continue;
+        }
+        if (hasResolutionFilter) {
+          const val = ((r.resolution_status as string | null) ?? summary.resolution_status ?? null)?.trim().toLowerCase();
+          if (!val || val === 'unknown') { if (!wantUnresolved) continue; }
+          else if (!resolutionTargets.has(val)) continue;
+        }
+        if (hasLanguageFilter) {
+          const lang = (((r.language as string | null) ?? summary.language ?? null) || '').trim().toLowerCase();
+          if (!lang) { if (!wantUnknownLang) continue; }
+          else if (!languageTargets.has(lang)) continue;
+        }
+        if (hasSegmentFilter) {
+          const seg = getSegment(playerAttrs);
+          if (seg == null || !segmentTargets.has(seg)) continue;
+        }
+        if (hasVipLevelFilter) {
+          const lvl = getVipLevelNum(playerAttrs);
+          if (lvl == null || !vipLevelTargets.has(lvl)) continue;
+        }
+
+        accumulateHeatmap((r.intercom_created_at as string | null) ?? '', items);
+      }
     }
+
     const weeklyTopN = hasIssueFilter ? Object.keys(weeklyAgg).length : 5;
     const weeklyTop = Object.values(weeklyAgg)
       .sort((a, b) => b.total - a.total)
