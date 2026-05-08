@@ -128,10 +128,19 @@ function formatSnapshot(byAm: Map<string, AmCounts>, total: number, now: Date): 
   const TOP = '▔'.repeat(20);
   const BOT = '▁'.repeat(20);
 
+  let totalUnder24 = 0;
+  let totalOver24  = 0;
+  for (const c of byAm.values()) {
+    totalUnder24 += c.under24;
+    totalOver24  += c.over24;
+  }
+
   const lines: string[] = [];
   lines.push(`📊 Pending Action Cases Snapshot | 🕒 ${hh}:${mm} UTC`);
   lines.push(TOP);
   lines.push(`Total Pending: ${total}`);
+  lines.push(`Total Pending 🟢<24h: ${totalUnder24}`);
+  lines.push(`Total Pending 🔴>24h: ${totalOver24}`);
   lines.push(BOT);
   lines.push('');
 
