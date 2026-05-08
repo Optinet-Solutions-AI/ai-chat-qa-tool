@@ -1476,6 +1476,7 @@ export async function GET(req: NextRequest) {
         uncategorized,
         alertWorthy: overviewAlertWorthy,
         analyzedPct: overviewTotal > 0 ? Math.round((overviewAnalyzed / overviewTotal) * 100) : 0,
+        categorizedPct: overviewAnalyzed > 0 ? Math.round((categorized / overviewAnalyzed) * 100) : 0,
       };
       responseBody.escalationStats = {
         totalEscalations,

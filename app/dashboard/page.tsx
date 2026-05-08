@@ -19,6 +19,7 @@ interface Overview {
   uncategorized: number;
   alertWorthy: number;
   analyzedPct: number;
+  categorizedPct: number;
 }
 
 interface LabelCount { label: string; count: number; }
@@ -1037,6 +1038,7 @@ export default function DashboardPage() {
             <StatCard
               label="Categorized"
               value={data.overview.categorized}
+              sub={`${data.overview.categorizedPct}% of analyzed`}
               accent="violet"
               icon="check"
               onClick={(e) => navToConversations({ categorized: 'true' }, e)}
