@@ -25,6 +25,10 @@ interface HeatmapProps {
   /** When true, renders a Low → High gradient strip below the grid, anchored
       with 0 and the dataset max so users can map shades to actual counts. */
   showLegend?: boolean;
+  /** Optional override for the cell hover tooltip. Defaults to
+      "{rowLabel} · {colLabel}: {value}". Used by the Daily/Hourly heatmap to
+      append the list of issues being aggregated into each cell. */
+  getCellTitle?: (rowLabel: string, colLabel: string, value: number) => string;
 }
 
 // Two palettes — both run from a deep cool baseline up to a hot/saturated end,
@@ -66,6 +70,7 @@ export default function IssueHeatmap({
   onCellClick,
   highlightLastCol = false,
   showLegend = false,
+  getCellTitle,
 }: HeatmapProps) {
   const shades = PALETTES[palette];
   let max = 1;
@@ -124,7 +129,7 @@ export default function IssueHeatmap({
                   style={{ background: bg, height: cellHeight, color: fg, ['--cell-color' as string]: bg } as React.CSSProperties}
                   onClick={onCellClick ? (e) => onCellClick(r.key, c.key, v, e) : undefined}
                   onMouseDown={onCellClick ? (e) => { if (e.button === 1) { e.preventDefault(); onCellClick(r.key, c.key, v, e); } } : undefined}
-                  title={`${r.label} · ${c.label}: ${v}`}
+                  title={getCellTitle ? getCellTitle(r.label, c.label, v) : `${r.label} · ${c.label}: ${v}`}
                 >
                   {showCounts && v > 0 ? v : ''}
                 </div>

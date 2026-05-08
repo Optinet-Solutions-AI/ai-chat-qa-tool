@@ -47,7 +47,7 @@ interface WeeklyIssueHeatmap {
 
 interface DailyHourlyIssueHeatmap {
   dates: string[];
-  cells: { date: string; hour: number; count: number }[];
+  cells: { date: string; hour: number; count: number; byIssue: Record<string, number> }[];
   topIssues: string[];
 }
 
@@ -156,7 +156,7 @@ function flooredDate(d: string): string {
 // Bump CACHE_VERSION whenever the payload shape changes so stale cached
 // payloads from a prior deploy are ignored instead of crashing the UI when a
 // newly-required field is read off them.
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 function getCachedScoped(key: string): { data: ScopedDashboardData; isStale: boolean } | null {
   try {
     const raw = localStorage.getItem(`dashboard:scoped:${CACHE_VERSION}:${key}`);
@@ -1379,6 +1379,32 @@ export default function DashboardPage() {
                   palette="magenta"
                   cellHeight="22px"
                   rowLabelWidth="80px"
+                  getCellTitle={(rowLabel, colLabel, v) => {
+                    const head = `${rowLabel} · ${colLabel}: ${v} conversation${v === 1 ? '' : 's'}`;
+                    if (v === 0) return head;
+                    // Pull the per-issue breakdown for this cell. We re-derive
+                    // (date, hour) from the labels — rowLabel is "DD-Mon" so we
+                    // match against the current date axis instead of parsing it.
+                    const dateIdx = data.dailyHourlyIssueHeatmap.dates.findIndex((d) => {
+                      const dt = new Date(d + 'T00:00:00Z');
+                      const lab = `${String(dt.getUTCDate()).padStart(2, '0')}-${dt.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+                      return lab === rowLabel;
+                    });
+                    if (dateIdx < 0) return head;
+                    const date = data.dailyHourlyIssueHeatmap.dates[dateIdx];
+                    const hour = parseInt(colLabel, 10);
+                    const cell = data.dailyHourlyIssueHeatmap.cells.find((c) => c.date === date && c.hour === hour);
+                    if (!cell) return head;
+                    const entries = Object.entries(cell.byIssue).sort(([, a], [, b]) => b - a);
+                    if (entries.length === 0) return head;
+                    // Sums can exceed the cell total when a chat flagged more
+                    // than one top issue — call that out so the math reads as
+                    // intentional, not a count discrepancy.
+                    const sum = entries.reduce((acc, [, n]) => acc + n, 0);
+                    const overlapNote = sum > v ? ' (some chats flagged multiple issues)' : '';
+                    const lines = entries.map(([issue, n]) => `  • ${issue}: ${n}`);
+                    return `${head}${overlapNote}\n${lines.join('\n')}`;
+                  }}
                   onCellClick={(rowKey, colKey, _v, e) => navToConversations(
                     {
                       dateFrom: rowKey,
@@ -1391,13 +1417,12 @@ export default function DashboardPage() {
                 />
                 {data.dailyHourlyIssueHeatmap.topIssues.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-slate-500">
-                    <span className="font-medium text-slate-400">Issues counted:</span>
-                    {data.dailyHourlyIssueHeatmap.topIssues.map((issue, i) => (
-                      <span key={issue} className="inline-flex items-center gap-1.5">
-                        <span
-                          className="inline-block w-2 h-2 rounded-full"
-                          style={{ background: COLORS[i % COLORS.length] }}
-                        />
+                    <span className="font-medium text-slate-400">Issues counted (any of):</span>
+                    {data.dailyHourlyIssueHeatmap.topIssues.map((issue) => (
+                      <span
+                        key={issue}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200"
+                      >
                         {issue}
                       </span>
                     ))}

@@ -367,6 +367,16 @@ export async function GET(req: NextRequest) {
       });
     }
     const qualifiedIssues = Object.values(allIssueFreq).filter(({ count }) => count >= minIssueCount);
+    // Same gate the Issue dropdown uses, keyed by normalizeIssueKey so the
+    // heatmap accumulators can collapse AI label variants ("Self-Exclusion /
+    // Account Deletion Request (preventive gambling stop)") onto the canonical
+    // entry ("Self-Exclusion Requests") and drop long-tail labels that didn't
+    // qualify for the dropdown. Value is the canonical display label.
+    const qualifiedIssueLabel = new Map<string, string>(
+      Object.entries(allIssueFreq)
+        .filter(([, v]) => v.count >= minIssueCount)
+        .map(([k, v]) => [k, v.label]),
+    );
     const groupedIssues = canonicalCategories
       .map((category) => {
         const pfx = numPrefix(category);
@@ -565,7 +575,12 @@ export async function GET(req: NextRequest) {
     };
     type DailyHourlyIssueHeatmapOut = {
       dates: string[];
-      cells: { date: string; hour: number; count: number }[];
+      // `count` = unique conversations in the (date, hour) bucket that flagged
+      // any top issue. `byIssue` keys map to the same labels listed in
+      // `topIssues`, with values counting conversations that flagged that
+      // specific issue — sums can exceed `count` when a single chat flagged
+      // multiple top issues. Used by the hover tooltip to break a cell down.
+      cells: { date: string; hour: number; count: number; byIssue: Record<string, number> }[];
       topIssues: string[];
     };
     const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -610,38 +625,65 @@ export async function GET(req: NextRequest) {
       if (!iso) return;
       const dateStr = iso.slice(0, 10);
       if (dateStr > heatmapTo) return;
+      // Item-level filtering — without this, a chat passing the conversation
+      // filter (because it has at least one matching item) would also leak its
+      // unrelated items into the heatmap top-N. Mirrors how Top 5 Issues
+      // re-checks each item against the active category/issue filters.
+      const itemPasses = (it: { category: string; item: string }) => {
+        if (hasCategoryFilter && !matchesCategory(it.category)) return false;
+        if (hasIssueFilter    && !matchesIssue(it.item)) return false;
+        return true;
+      };
+      // Resolve an item to its qualified canonical key+label, or null if it
+      // doesn't make the dropdown's qualification gate. Dropping long-tail AI
+      // label variants here keeps the heatmap chips aligned with the issues
+      // the user can actually pick from the Issue filter.
+      const resolveQualified = (rawItem: string): { key: string; label: string } | null => {
+        const clean = stripItemNum(rawItem);
+        if (!clean) return null;
+        const key = normalizeIssueKey(clean);
+        const label = qualifiedIssueLabel.get(key);
+        return label ? { key, label } : null;
+      };
       // Weekly accumulation — only rows inside the 7-day window.
       if (dateStr >= weeklyHeatmapFrom) {
         const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
         const seen = new Set<string>();
         for (const it of items) {
           if (it.item === 'Unknown') continue;
-          const clean = stripItemNum(it.item);
-          if (!clean) continue;
-          const key = normalizeIssueKey(clean);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          if (!weeklyAgg[key]) weeklyAgg[key] = { label: clean, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
-          weeklyAgg[key].total += 1;
-          weeklyAgg[key].perDow[dow] += 1;
-          weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
+          if (!itemPasses(it)) continue;
+          const q = resolveQualified(it.item);
+          if (!q) continue;
+          if (seen.has(q.key)) continue;
+          seen.add(q.key);
+          if (!weeklyAgg[q.key]) weeklyAgg[q.key] = { label: q.label, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
+          weeklyAgg[q.key].total += 1;
+          weeklyAgg[q.key].perDow[dow] += 1;
+          weeklyAgg[q.key].labelCounts[q.label] = (weeklyAgg[q.key].labelCounts[q.label] ?? 0) + 1;
         }
       }
       // Daily/hourly accumulation — only rows inside the 30-62 day window.
       if (dateStr >= dailyHourlyHeatmapFrom) {
-        dailyHourlyRows.push({ iso, items });
+        // Stash items already resolved to canonical (key, label) pairs so the
+        // second pass (cell counts) reuses the qualification result instead of
+        // re-resolving row-by-row.
+        const matchingItems: { category: string; item: string }[] = [];
         const seen = new Set<string>();
         for (const it of items) {
           if (it.item === 'Unknown') continue;
-          const clean = stripItemNum(it.item);
-          if (!clean) continue;
-          const key = normalizeIssueKey(clean);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          if (!dailyHourlyTotalAgg[key]) dailyHourlyTotalAgg[key] = { total: 0, labelCounts: {} };
-          dailyHourlyTotalAgg[key].total += 1;
-          dailyHourlyTotalAgg[key].labelCounts[clean] = (dailyHourlyTotalAgg[key].labelCounts[clean] ?? 0) + 1;
+          if (!itemPasses(it)) continue;
+          const q = resolveQualified(it.item);
+          if (!q) continue;
+          // Carry the canonical label downstream so cell-count attribution
+          // (in the second pass) uses the same name the chip row shows.
+          matchingItems.push({ category: it.category, item: q.label });
+          if (seen.has(q.key)) continue;
+          seen.add(q.key);
+          if (!dailyHourlyTotalAgg[q.key]) dailyHourlyTotalAgg[q.key] = { total: 0, labelCounts: {} };
+          dailyHourlyTotalAgg[q.key].total += 1;
+          dailyHourlyTotalAgg[q.key].labelCounts[q.label] = (dailyHourlyTotalAgg[q.key].labelCounts[q.label] ?? 0) + 1;
         }
+        if (matchingItems.length > 0) dailyHourlyRows.push({ iso, items: matchingItems });
       }
     };
 
@@ -755,22 +797,35 @@ export async function GET(req: NextRequest) {
       const [bestLabel] = Object.entries(v.labelCounts).sort((a, b) => b[1] - a[1])[0];
       return bestLabel;
     });
-    const dailyHourlyCells: Record<string, number> = {};
+    // key → display label so the per-issue breakdown emits the same labels as
+    // `topIssues` (lets the hover tooltip cite issues by their UI name).
+    const dailyHourlyKeyToLabel = new Map<string, string>(
+      dailyHourlyTopEntries.map(([k], i) => [k, dailyHourlyTopLabels[i]]),
+    );
+    const dailyHourlyCells: Record<string, { count: number; byIssue: Record<string, number> }> = {};
     for (const r of dailyHourlyRows) {
       const dateStr = r.iso.slice(0, 10);
       const hour = new Date(r.iso).getUTCHours();
-      const flagsTop = r.items.some((it) => {
-        if (it.item === 'Unknown') return false;
+      // Collect the top-issue keys this conversation flagged (deduped — a chat
+      // listing the same issue twice still counts once per cell).
+      const hitKeys = new Set<string>();
+      for (const it of r.items) {
+        if (it.item === 'Unknown') continue;
         const key = normalizeIssueKey(stripItemNum(it.item));
-        return dailyHourlyTopKeys.has(key);
-      });
-      if (!flagsTop) continue;
+        if (dailyHourlyTopKeys.has(key)) hitKeys.add(key);
+      }
+      if (hitKeys.size === 0) continue;
       const cellKey = `${dateStr}|${hour}`;
-      dailyHourlyCells[cellKey] = (dailyHourlyCells[cellKey] ?? 0) + 1;
+      const cell = dailyHourlyCells[cellKey] ??= { count: 0, byIssue: {} };
+      cell.count += 1;
+      for (const k of hitKeys) {
+        const label = dailyHourlyKeyToLabel.get(k) ?? k;
+        cell.byIssue[label] = (cell.byIssue[label] ?? 0) + 1;
+      }
     }
-    const allDailyHourlyCells = Object.entries(dailyHourlyCells).map(([k, count]) => {
+    const allDailyHourlyCells = Object.entries(dailyHourlyCells).map(([k, v]) => {
       const [date, hourStr] = k.split('|');
-      return { date, hour: parseInt(hourStr, 10), count };
+      return { date, hour: parseInt(hourStr, 10), count: v.count, byIssue: v.byIssue };
     });
     // Build the date axis for the daily/hourly grid from the heatmap window,
     // then trim leading dates with no data — the window can straddle the
