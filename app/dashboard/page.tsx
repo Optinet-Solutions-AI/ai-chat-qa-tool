@@ -156,7 +156,7 @@ function flooredDate(d: string): string {
 // Bump CACHE_VERSION whenever the payload shape changes so stale cached
 // payloads from a prior deploy are ignored instead of crashing the UI when a
 // newly-required field is read off them.
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 function getCachedScoped(key: string): { data: ScopedDashboardData; isStale: boolean } | null {
   try {
     const raw = localStorage.getItem(`dashboard:scoped:${CACHE_VERSION}:${key}`);

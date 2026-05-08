@@ -367,16 +367,6 @@ export async function GET(req: NextRequest) {
       });
     }
     const qualifiedIssues = Object.values(allIssueFreq).filter(({ count }) => count >= minIssueCount);
-    // Same gate the Issue dropdown uses, keyed by normalizeIssueKey so the
-    // heatmap accumulators can collapse AI label variants ("Self-Exclusion /
-    // Account Deletion Request (preventive gambling stop)") onto the canonical
-    // entry ("Self-Exclusion Requests") and drop long-tail labels that didn't
-    // qualify for the dropdown. Value is the canonical display label.
-    const qualifiedIssueLabel = new Map<string, string>(
-      Object.entries(allIssueFreq)
-        .filter(([, v]) => v.count >= minIssueCount)
-        .map(([k, v]) => [k, v.label]),
-    );
     const groupedIssues = canonicalCategories
       .map((category) => {
         const pfx = numPrefix(category);
@@ -614,80 +604,33 @@ export async function GET(req: NextRequest) {
     const heatmapNeedsExtraFetch = wantScoped && dateFrom != null && dateFrom > unionExtraFrom;
     const todayDow = new Date().getUTCDay();
     const dowOrder = Array.from({ length: 7 }, (_, i) => (todayDow - 6 + i + 7) % 7);
-    const weeklyAgg: Record<string, { label: string; total: number; perDow: number[]; labelCounts: Record<string, number> }> = {};
-    // Daily/hourly needs two passes (pick top issues, then count cells), so we
-    // collect every row that lands inside its window once and re-walk the list.
-    type DhRow = { iso: string; items: { category: string; item: string }[] };
-    const dailyHourlyRows: DhRow[] = [];
-    const dailyHourlyTotalAgg: Record<string, { total: number; labelCounts: Record<string, number> }> = {};
-
-    const accumulateHeatmap = (iso: string, items: { category: string; item: string }[]) => {
+    // Phase 1 — collect every row inside the union heatmap window (no
+    // qualification gate yet). We can't build a useful qualification gate from
+    // `parsed` alone because that's just the user's date-scoped slice (often a
+    // single day), while the heatmap aggregates 30+ days. So we collect first,
+    // then derive the gate from the actual heatmap-window dataset, then
+    // accumulate. Items pre-filter at the item level so unrelated items in a
+    // conversation that only passed because of one matching item don't leak in.
+    type HeatmapRow = { iso: string; items: { category: string; item: string }[]; inWeekly: boolean; inDaily: boolean };
+    const heatmapWindowRows: HeatmapRow[] = [];
+    const itemPasses = (it: { category: string; item: string }) => {
+      if (hasCategoryFilter && !matchesCategory(it.category)) return false;
+      if (hasIssueFilter    && !matchesIssue(it.item)) return false;
+      return true;
+    };
+    const collectHeatmapRow = (iso: string, items: { category: string; item: string }[]) => {
       if (!iso) return;
       const dateStr = iso.slice(0, 10);
       if (dateStr > heatmapTo) return;
-      // Item-level filtering — without this, a chat passing the conversation
-      // filter (because it has at least one matching item) would also leak its
-      // unrelated items into the heatmap top-N. Mirrors how Top 5 Issues
-      // re-checks each item against the active category/issue filters.
-      const itemPasses = (it: { category: string; item: string }) => {
-        if (hasCategoryFilter && !matchesCategory(it.category)) return false;
-        if (hasIssueFilter    && !matchesIssue(it.item)) return false;
-        return true;
-      };
-      // Resolve an item to its qualified canonical key+label, or null if it
-      // doesn't make the dropdown's qualification gate. Dropping long-tail AI
-      // label variants here keeps the heatmap chips aligned with the issues
-      // the user can actually pick from the Issue filter.
-      const resolveQualified = (rawItem: string): { key: string; label: string } | null => {
-        const clean = stripItemNum(rawItem);
-        if (!clean) return null;
-        const key = normalizeIssueKey(clean);
-        const label = qualifiedIssueLabel.get(key);
-        return label ? { key, label } : null;
-      };
-      // Weekly accumulation — only rows inside the 7-day window.
-      if (dateStr >= weeklyHeatmapFrom) {
-        const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
-        const seen = new Set<string>();
-        for (const it of items) {
-          if (it.item === 'Unknown') continue;
-          if (!itemPasses(it)) continue;
-          const q = resolveQualified(it.item);
-          if (!q) continue;
-          if (seen.has(q.key)) continue;
-          seen.add(q.key);
-          if (!weeklyAgg[q.key]) weeklyAgg[q.key] = { label: q.label, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
-          weeklyAgg[q.key].total += 1;
-          weeklyAgg[q.key].perDow[dow] += 1;
-          weeklyAgg[q.key].labelCounts[q.label] = (weeklyAgg[q.key].labelCounts[q.label] ?? 0) + 1;
-        }
-      }
-      // Daily/hourly accumulation — only rows inside the 30-62 day window.
-      if (dateStr >= dailyHourlyHeatmapFrom) {
-        // Stash items already resolved to canonical (key, label) pairs so the
-        // second pass (cell counts) reuses the qualification result instead of
-        // re-resolving row-by-row.
-        const matchingItems: { category: string; item: string }[] = [];
-        const seen = new Set<string>();
-        for (const it of items) {
-          if (it.item === 'Unknown') continue;
-          if (!itemPasses(it)) continue;
-          const q = resolveQualified(it.item);
-          if (!q) continue;
-          // Carry the canonical label downstream so cell-count attribution
-          // (in the second pass) uses the same name the chip row shows.
-          matchingItems.push({ category: it.category, item: q.label });
-          if (seen.has(q.key)) continue;
-          seen.add(q.key);
-          if (!dailyHourlyTotalAgg[q.key]) dailyHourlyTotalAgg[q.key] = { total: 0, labelCounts: {} };
-          dailyHourlyTotalAgg[q.key].total += 1;
-          dailyHourlyTotalAgg[q.key].labelCounts[q.label] = (dailyHourlyTotalAgg[q.key].labelCounts[q.label] ?? 0) + 1;
-        }
-        if (matchingItems.length > 0) dailyHourlyRows.push({ iso, items: matchingItems });
-      }
+      const inWeekly = dateStr >= weeklyHeatmapFrom;
+      const inDaily  = dateStr >= dailyHourlyHeatmapFrom;
+      if (!inWeekly && !inDaily) return;
+      const passingItems = items.filter((it) => it.item !== 'Unknown' && itemPasses(it));
+      if (passingItems.length === 0) return;
+      heatmapWindowRows.push({ iso, items: passingItems, inWeekly, inDaily });
     };
 
-    for (const p of filteredParsed) accumulateHeatmap(p.iso, p.items);
+    for (const p of filteredParsed) collectHeatmapRow(p.iso, p.items);
 
     if (heatmapNeedsExtraFetch) {
       // Fetch the [unionExtraFrom, dateFrom) backfill slice with the same DB
@@ -766,7 +709,95 @@ export async function GET(req: NextRequest) {
           if (lvl == null || !vipLevelTargets.has(lvl)) continue;
         }
 
-        accumulateHeatmap((r.intercom_created_at as string | null) ?? '', items);
+        collectHeatmapRow((r.intercom_created_at as string | null) ?? '', items);
+      }
+    }
+
+    // Phase 2 — build a qualification gate from the heatmap-window dataset
+    // itself (NOT the user's scoped slice). The scoped-data gate fails when
+    // the user filters to a single day: an issue that's #1 across 30 days but
+    // rare today wouldn't qualify, so it'd silently drop from the chip row.
+    // Sizing the gate to the heatmap window keeps non-canonical-but-frequent
+    // labels (e.g. "Expected Goodwill Bonuses Not Received") in the chips.
+    const heatmapItemFreq: Record<string, { count: number; label: string; labelCounts: Record<string, number> }> = {};
+    for (const r of heatmapWindowRows) {
+      const seen = new Set<string>();
+      for (const it of r.items) {
+        const clean = stripItemNum(it.item);
+        if (!clean) continue;
+        const key = normalizeIssueKey(clean);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!heatmapItemFreq[key]) heatmapItemFreq[key] = { count: 0, label: clean, labelCounts: {} };
+        heatmapItemFreq[key].count++;
+        heatmapItemFreq[key].labelCounts[clean] = (heatmapItemFreq[key].labelCounts[clean] ?? 0) + 1;
+      }
+    }
+    // Canonical labels always qualify (count gate doesn't apply) and their
+    // canonical wording wins so AI variants don't pollute the chip row.
+    const canonicalKeyToLabel = new Map<string, string>();
+    for (const items of Object.values(canonicalIssuesByPrefix)) {
+      for (const canonLabel of items) {
+        canonicalKeyToLabel.set(normalizeIssueKey(canonLabel), canonLabel);
+      }
+    }
+    for (const [key, canonLabel] of canonicalKeyToLabel) {
+      if (heatmapItemFreq[key]) heatmapItemFreq[key].label = canonLabel;
+    }
+    const heatmapMinCount = Math.max(3, Math.ceil(heatmapWindowRows.length * 0.001));
+    const heatmapQualifiedLabel = new Map<string, string>();
+    for (const [key, v] of Object.entries(heatmapItemFreq)) {
+      if (canonicalKeyToLabel.has(key) || v.count >= heatmapMinCount) {
+        heatmapQualifiedLabel.set(key, v.label);
+      }
+    }
+
+    // Phase 3 — accumulate weekly + daily/hourly using the heatmap-window gate.
+    const weeklyAgg: Record<string, { label: string; total: number; perDow: number[]; labelCounts: Record<string, number> }> = {};
+    type DhRow = { iso: string; items: { category: string; item: string }[] };
+    const dailyHourlyRows: DhRow[] = [];
+    const dailyHourlyTotalAgg: Record<string, { total: number; labelCounts: Record<string, number> }> = {};
+
+    for (const r of heatmapWindowRows) {
+      const dateStr = r.iso.slice(0, 10);
+      // Weekly accumulation — only rows inside the 7-day window.
+      if (r.inWeekly) {
+        const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
+        const seen = new Set<string>();
+        for (const it of r.items) {
+          const clean = stripItemNum(it.item);
+          if (!clean) continue;
+          const key = normalizeIssueKey(clean);
+          const label = heatmapQualifiedLabel.get(key);
+          if (!label) continue;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (!weeklyAgg[key]) weeklyAgg[key] = { label, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
+          weeklyAgg[key].total += 1;
+          weeklyAgg[key].perDow[dow] += 1;
+          weeklyAgg[key].labelCounts[label] = (weeklyAgg[key].labelCounts[label] ?? 0) + 1;
+        }
+      }
+      // Daily/hourly accumulation — only rows inside the 30-62 day window.
+      if (r.inDaily) {
+        // Carry canonical-resolved items forward so the cell-counting pass
+        // matches against the same labels the chip row will display.
+        const matchingItems: { category: string; item: string }[] = [];
+        const seen = new Set<string>();
+        for (const it of r.items) {
+          const clean = stripItemNum(it.item);
+          if (!clean) continue;
+          const key = normalizeIssueKey(clean);
+          const label = heatmapQualifiedLabel.get(key);
+          if (!label) continue;
+          matchingItems.push({ category: it.category, item: label });
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (!dailyHourlyTotalAgg[key]) dailyHourlyTotalAgg[key] = { total: 0, labelCounts: {} };
+          dailyHourlyTotalAgg[key].total += 1;
+          dailyHourlyTotalAgg[key].labelCounts[label] = (dailyHourlyTotalAgg[key].labelCounts[label] ?? 0) + 1;
+        }
+        if (matchingItems.length > 0) dailyHourlyRows.push({ iso: r.iso, items: matchingItems });
       }
     }
 
