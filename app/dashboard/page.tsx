@@ -41,7 +41,7 @@ interface DissatisfactionTrend {
 }
 
 interface WeeklyIssueHeatmap {
-  days: { date: string; label: string }[];
+  days: { dow: number; label: string }[];
   issues: { issue: string; counts: number[] }[];
 }
 
@@ -85,6 +85,7 @@ interface ScopedDashboardData {
   brandBreakdown: LabelCount[];
   agentBreakdown: LabelCount[];
   conversationsByDate: DateCount[];
+  weeklyIssueHeatmap: WeeklyIssueHeatmap;
   filterOptions: { languages: string[]; categories: string[]; issues: { category: string; items: string[] }[] };
 }
 
@@ -92,7 +93,6 @@ interface GlobalDashboardData {
   pendingEscalations: { pendingUnder24h: number; pendingOver24h: number };
   issueSpikes: IssueSpike[];
   dissatisfactionTrend: DissatisfactionTrend;
-  weeklyIssueHeatmap: WeeklyIssueHeatmap;
   dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmap;
   filterOptions: { brands: string[]; agents: string[]; countries: string[] };
 }
@@ -109,7 +109,7 @@ function mergeDashboard(s: ScopedDashboardData, g: GlobalDashboardData): Dashboa
     },
     issueSpikes:             g.issueSpikes,
     dissatisfactionTrend:    g.dissatisfactionTrend,
-    weeklyIssueHeatmap:      g.weeklyIssueHeatmap,
+    weeklyIssueHeatmap:      s.weeklyIssueHeatmap,
     dailyHourlyIssueHeatmap: g.dailyHourlyIssueHeatmap,
     resolutionBreakdown:     s.resolutionBreakdown,
     severityBreakdown:       s.severityBreakdown,
@@ -1301,19 +1301,19 @@ export default function DashboardPage() {
               )}
             </Section>
 
-            {/* Weekly Issue Heat Map — last 7 days, top 5 issues × day-of-week.
-                Per spec: today on far right, dynamically shifts each new day. */}
+            {/* Weekly Issue Heat Map — top 5 issues × day-of-week, accumulated
+                across the selected date range. Today on the far right. */}
             <Section title="Weekly Issue Heat Map">
               {data.weeklyIssueHeatmap.issues.length === 0 ? (
-                <Empty message="No issue data in the last 7 days" />
+                <Empty message="No issue data in selected range" />
               ) : (
                 <IssueHeatmap
                   rows={data.weeklyIssueHeatmap.issues.map((r) => ({ key: r.issue, label: r.issue }))}
-                  cols={data.weeklyIssueHeatmap.days.map((d) => ({ key: d.date, label: d.label }))}
+                  cols={data.weeklyIssueHeatmap.days.map((d) => ({ key: String(d.dow), label: d.label }))}
                   getValue={(rowKey, colKey) => {
                     const row = data.weeklyIssueHeatmap.issues.find((x) => x.issue === rowKey);
                     if (!row) return 0;
-                    const colIdx = data.weeklyIssueHeatmap.days.findIndex((d) => d.date === colKey);
+                    const colIdx = data.weeklyIssueHeatmap.days.findIndex((d) => String(d.dow) === colKey);
                     return colIdx >= 0 ? row.counts[colIdx] : 0;
                   }}
                   palette="cyan"
@@ -1322,7 +1322,7 @@ export default function DashboardPage() {
                   showCounts
                   highlightLastCol
                   showLegend
-                  onCellClick={(rowKey, colKey, _v, e) => navToConversations({ issue_item: rowKey, dateFrom: colKey, dateTo: colKey }, e)}
+                  onCellClick={(rowKey, _colKey, _v, e) => navToConversations({ issue_item: rowKey, dateFrom, dateTo }, e)}
                 />
               )}
             </Section>

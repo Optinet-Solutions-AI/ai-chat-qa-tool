@@ -175,6 +175,7 @@ export async function GET(req: NextRequest) {
 
     // ── Parse summary JSON for fields not stored individually ────────────
     type Parsed = {
+      iso: string;
       resolution_status: string | null;
       language: string | null;
       severity: string | null;
@@ -194,6 +195,7 @@ export async function GET(req: NextRequest) {
         player_custom_attributes: (r.player_custom_attributes as Record<string, unknown> | null) ?? null,
       };
       return {
+        iso: (r.intercom_created_at as string | null) ?? '',
         resolution_status:
           (r.resolution_status as string | null) ??
           summary.resolution_status ?? null,
@@ -548,6 +550,51 @@ export async function GET(req: NextRequest) {
       (r) => (r.agent_name as string | null)
     );
 
+    // ── Weekly Issue Heat Map (top 5 issues × day-of-week) ───────────────
+    // Aggregates over the user's selected date range, accumulating each
+    // weekday across all matching weeks. Columns are ordered with today's
+    // weekday on the right so the layout stays familiar as the date rolls.
+    type WeeklyIssueHeatmapOut = {
+      days: { dow: number; label: string }[];
+      issues: { issue: string; counts: number[] }[];
+    };
+    const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const todayDow = new Date().getUTCDay();
+    const dowOrder = Array.from({ length: 7 }, (_, i) => (todayDow - 6 + i + 7) % 7);
+    const weeklyAgg: Record<string, { label: string; total: number; perDow: number[]; labelCounts: Record<string, number> }> = {};
+    for (const p of filteredParsed) {
+      if (!p.iso) continue;
+      const dow = new Date(p.iso).getUTCDay();
+      const seen = new Set<string>();
+      for (const it of p.items) {
+        if (it.item === 'Unknown') continue;
+        const clean = stripItemNum(it.item);
+        if (!clean) continue;
+        const key = normalizeIssueKey(clean);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!weeklyAgg[key]) weeklyAgg[key] = { label: clean, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
+        weeklyAgg[key].total += 1;
+        weeklyAgg[key].perDow[dow] += 1;
+        weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
+      }
+    }
+    const weeklyTopN = hasIssueFilter ? Object.keys(weeklyAgg).length : 5;
+    const weeklyTop = Object.values(weeklyAgg)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, weeklyTopN)
+      .map(({ labelCounts, perDow }) => {
+        const [bestLabel] = Object.entries(labelCounts).sort((a, b) => b[1] - a[1])[0];
+        return {
+          issue: bestLabel,
+          counts: dowOrder.map((dow) => perDow[dow]),
+        };
+      });
+    const weeklyIssueHeatmap: WeeklyIssueHeatmapOut = {
+      days: dowOrder.map((dow) => ({ dow, label: dayOfWeekLabels[dow] })),
+      issues: weeklyTop,
+    };
+
     // ── Escalation stats (Asana) ─────────────────────────────────────────
     // A "live" escalation is a conversation with an Asana task that hasn't been
     // deleted in Asana — same row set used by dbGetAsanaReportingMetrics so the
@@ -674,10 +721,6 @@ export async function GET(req: NextRequest) {
       issues: string[];
       data: Array<Record<string, string | number>>;
     };
-    type WeeklyIssueHeatmapOut = {
-      days: { date: string; label: string }[];
-      issues: { issue: string; counts: number[] }[];
-    };
     type DailyHourlyIssueHeatmapOut = {
       dates: string[];
       cells: { date: string; hour: number; count: number }[];
@@ -687,7 +730,6 @@ export async function GET(req: NextRequest) {
       topIssues: string[];
     };
     let dissatisfactionTrend: DissatisfactionTrendOut = { issues: [], data: [] };
-    let weeklyIssueHeatmap: WeeklyIssueHeatmapOut = { days: [], issues: [] };
     let dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmapOut = { dates: [], cells: [], topIssues: [] };
 
     if (wantGlobal && widerRowsPromise) {
@@ -770,7 +812,6 @@ export async function GET(req: NextRequest) {
       }
       return out;
     })();
-    const days7 = days30.slice(-7);
 
     // ── Top 5 Issues trend (top issues that cause dissatisfaction, 30d) ──
     // Only conversations with a non-null severity contribute (those flagged by
@@ -822,46 +863,6 @@ export async function GET(req: NextRequest) {
     dissatisfactionTrend = {
       issues: trendTopIssues.map((t) => t.issue),
       data: firstNonZero <= 0 ? trendDataAllDays : trendDataAllDays.slice(firstNonZero),
-    };
-
-    // ── Weekly Issue Heat Map (top 5 issues × last 7 days) ──────────────
-    const weeklyAgg: Record<string, { label: string; total: number; perDate: Record<string, number>; labelCounts: Record<string, number> }> = {};
-    const last7 = new Set(days7);
-    for (const p of widerFiltered) {
-      const dateStr = p.iso.slice(0, 10);
-      if (!dateStr || !last7.has(dateStr)) continue;
-      const seen = new Set<string>();
-      for (const it of p.items) {
-        if (it.item === 'Unknown') continue;
-        const clean = stripItemNum(it.item);
-        if (!clean) continue;
-        const key = normalizeIssueKey(clean);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (!weeklyAgg[key]) weeklyAgg[key] = { label: clean, total: 0, perDate: {}, labelCounts: {} };
-        weeklyAgg[key].total += 1;
-        weeklyAgg[key].perDate[dateStr] = (weeklyAgg[key].perDate[dateStr] ?? 0) + 1;
-        weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
-      }
-    }
-    const weeklyTopN = hasIssueFilter ? Object.keys(weeklyAgg).length : 5;
-    const weeklyTop = Object.values(weeklyAgg)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, weeklyTopN)
-      .map(({ labelCounts, perDate }) => {
-        const [bestLabel] = Object.entries(labelCounts).sort((a, b) => b[1] - a[1])[0];
-        return {
-          issue: bestLabel,
-          counts: days7.map((d) => perDate[d] ?? 0),
-        };
-      });
-    const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    weeklyIssueHeatmap = {
-      days: days7.map((d) => ({
-        date: d,
-        label: dayOfWeekLabels[new Date(d + 'T00:00:00Z').getUTCDay()],
-      })),
-      issues: weeklyTop,
     };
 
     // ── Daily & Hourly Issue Heat Map (last 30 days × 24 hours) ────────
@@ -922,6 +923,11 @@ export async function GET(req: NextRequest) {
     } // end if (wantGlobal && widerRowsPromise)
 
     // ── Conversations by date (scoped) ───────────────────────────────────────
+    // The chart always shows at least the trailing 7 days ending at dateTo (or
+    // today). If the user's date filter is wider than 7 days, the chart follows
+    // the filter; if narrower, the chart extends backward so the trend stays
+    // legible. All other filters (brand, category, severity, …) still apply.
+    //
     // When a category filter is active we can't use the DB RPC (it has no category
     // param), so we group the already-filtered in-memory rows by CEST date instead.
     // The RPC fast-path only takes a single brand/agent — when the user picks
@@ -930,6 +936,19 @@ export async function GET(req: NextRequest) {
     // The conversations-by-date RPC accepts only single brand/agent and has no
     // country param, so any of these conditions force the in-memory fallback.
     const dbFiltersAreMulti = brands.length > 1 || agents.length > 1 || accountManagers.length > 1 || countries.length > 0;
+    const todayUTC = new Date().toISOString().slice(0, 10);
+    const chartTo  = (dateTo && dateTo < todayUTC) ? dateTo : todayUTC;
+    const chartFromCandidate = (() => {
+      const d = new Date(chartTo + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 6);
+      return d.toISOString().slice(0, 10);
+    })();
+    const chartFrom = (dateFrom && dateFrom < chartFromCandidate) ? dateFrom : chartFromCandidate;
+    // When dateFrom is null, applyFilters covers ANALYSIS_MIN_DATE..dateTo so
+    // filteredRows already includes the chart's window. Otherwise we need to
+    // fetch the slice [chartFrom, dateFrom) separately for the chart.
+    const chartNeedsExtraFetch = dateFrom != null && dateFrom > chartFrom;
+
     let conversationsByDate: { date: string; count: number }[] = [];
     if (wantScoped) {
       if (hasCategoryFilter || hasIssueFilter || hasSeverityFilter || hasLanguageFilter || hasSegmentFilter || hasVipLevelFilter || dbFiltersAreMulti) {
@@ -940,20 +959,108 @@ export async function GET(req: NextRequest) {
           const utcDate = new Date(iso).toISOString().slice(0, 10);
           dateCounts[utcDate] = (dateCounts[utcDate] ?? 0) + 1;
         }
+
+        if (chartNeedsExtraFetch) {
+          // Fetch the [chartFrom, dateFrom) slice with the same DB filters,
+          // then re-apply the in-memory filter cascade so the chart's older
+          // bars match the filters in effect on the rest of the dashboard.
+          const extraFromISO = new Date(chartFrom + 'T00:00:00Z').toISOString();
+          const extraToISO   = new Date(dateFrom! + 'T00:00:00.000Z').toISOString();
+          const extraRows: Array<Record<string, unknown>> = [];
+          let idx = 0;
+          while (true) {
+            const { data: page } = await applyConversationDbFilters(
+              supabase
+                .from('conversations')
+                .select('id, summary, language, intercom_created_at, dissatisfaction_severity, resolution_status, player_tags, player_segments, player_companies, tags, player_custom_attributes')
+                .not('summary', 'is', null)
+                .gte('intercom_created_at', extraFromISO)
+                .lt('intercom_created_at', extraToISO)
+                .order('intercom_created_at', { ascending: false })
+                .order('id', { ascending: false })
+                .range(idx, idx + PAGE_SIZE - 1),
+              {
+                brand:          brands,
+                agent:          agents,
+                accountManager: accountManagers,
+                country:        countries,
+              },
+            ) as { data: Array<Record<string, unknown>> | null };
+            if (!page || page.length === 0) break;
+            extraRows.push(...page);
+            if (page.length < PAGE_SIZE) break;
+            idx += PAGE_SIZE;
+          }
+
+          const severityTargets = new Set(severities.map((s) => normalizeSeverity(s)).filter((s): s is string => !!s));
+          const resolutionTargets = new Set(resolutions.map((r) => r.toLowerCase()));
+          const wantUnresolved = resolutionTargets.has('unresolved');
+          const languageTargets = new Set(languages.map((l) => l.toLowerCase()));
+          const wantUnknownLang = languageTargets.has('unknown');
+          const segmentTargets = new Set(segments.map((s) => parseSegmentFilter(s)).filter((s): s is 'VIP' | 'NON-VIP' | 'SoftSwiss' => s != null));
+          const vipLevelTargets = new Set(vipLevels.map((v) => parseVipLevelFilter(v)).filter((n): n is number => n != null));
+
+          for (const r of extraRows) {
+            const summary = parseAnalysisSummary(r.summary as string | null);
+            const playerAttrs = {
+              player_tags:              (r.player_tags as string[] | null) ?? [],
+              player_segments:          (r.player_segments as string[] | null) ?? [],
+              player_companies:         (r.player_companies as { name: string }[] | null) ?? [],
+              tags:                     (r.tags as string[] | null) ?? [],
+              player_custom_attributes: (r.player_custom_attributes as Record<string, unknown> | null) ?? null,
+            };
+            const cats = summary.results.map((x) => displayCategory(x.category ?? 'Unknown'));
+            const items = summary.results.map((x) => ({ category: displayCategory(x.category ?? 'Unknown'), item: x.item ?? 'Unknown' }));
+
+            if (hasCategoryFilter && !cats.some((c) => matchesCategory(c))) continue;
+            if (hasIssueFilter && !items.some((x) => matchesIssue(x.item))) continue;
+            if (hasSeverityFilter) {
+              const sev = (r.dissatisfaction_severity as string | null) ?? summary.dissatisfaction_severity ?? null;
+              const norm = normalizeSeverity(sev);
+              if (norm == null || !severityTargets.has(norm)) continue;
+            }
+            if (hasResolutionFilter) {
+              const val = ((r.resolution_status as string | null) ?? summary.resolution_status ?? null)?.trim().toLowerCase();
+              if (!val || val === 'unknown') { if (!wantUnresolved) continue; }
+              else if (!resolutionTargets.has(val)) continue;
+            }
+            if (hasLanguageFilter) {
+              const lang = (((r.language as string | null) ?? summary.language ?? null) || '').trim().toLowerCase();
+              if (!lang) { if (!wantUnknownLang) continue; }
+              else if (!languageTargets.has(lang)) continue;
+            }
+            if (hasSegmentFilter) {
+              const seg = getSegment(playerAttrs);
+              if (seg == null || !segmentTargets.has(seg)) continue;
+            }
+            if (hasVipLevelFilter) {
+              const lvl = getVipLevelNum(playerAttrs);
+              if (lvl == null || !vipLevelTargets.has(lvl)) continue;
+            }
+
+            const iso = r.intercom_created_at as string | null;
+            if (!iso) continue;
+            const utcDate = new Date(iso).toISOString().slice(0, 10);
+            dateCounts[utcDate] = (dateCounts[utcDate] ?? 0) + 1;
+          }
+        }
+
         conversationsByDate = Object.entries(dateCounts)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([date, count]) => ({ date, count }));
       } else {
         // Bare ISO-day bounds for the RPC — it accepts nullable ISO timestamps and
         // interprets them as inclusive UTC day starts/ends, matching the semantics
-        // applyConversationDbFilters uses for the gte/lt pair.
-        const rpcFromISO = dateFrom ? new Date(dateFrom).toISOString() : null;
-        const rpcToISO   = dateTo   ? (() => {
-          const end = new Date(dateTo);
+        // applyConversationDbFilters uses for the gte/lt pair. Use the chart's
+        // window so the trend always covers ≥ 7 days even when the user's
+        // dashboard date filter is narrower.
+        const rpcFromISO = new Date(chartFrom + 'T00:00:00Z').toISOString();
+        const rpcToISO   = (() => {
+          const end = new Date(chartTo);
           end.setUTCDate(end.getUTCDate() + 1);
           end.setUTCMilliseconds(-1);
           return end.toISOString();
-        })() : null;
+        })();
         const { data: dateAgg } = await supabase.rpc('get_conversations_by_cest_date', {
           p_date_from: rpcFromISO,
           p_date_to:   rpcToISO,
@@ -966,16 +1073,11 @@ export async function GET(req: NextRequest) {
         }));
       }
 
-      // Limit to last 30 days when no dateFrom filter, and fill gaps with 0 through today (UTC)
-      const todayUTC  = new Date().toISOString().slice(0, 10);
-      const endDate   = dateTo && dateTo < todayUTC ? dateTo : todayUTC;
-      const startDate = dateFrom
-        ? (conversationsByDate[0]?.date ?? endDate)
-        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      // Zero-fill across the chart's window so every day shows a tick.
       const countByDate = Object.fromEntries(conversationsByDate.map((d) => [d.date, d.count]));
       const filled: { date: string; count: number }[] = [];
-      const start = new Date(startDate + 'T00:00:00Z');
-      const end   = new Date(endDate   + 'T00:00:00Z');
+      const start = new Date(chartFrom + 'T00:00:00Z');
+      const end   = new Date(chartTo   + 'T00:00:00Z');
       for (const cur = new Date(start); cur <= end; cur.setUTCDate(cur.getUTCDate() + 1)) {
         const key = cur.toISOString().slice(0, 10);
         filled.push({ date: key, count: countByDate[key] ?? 0 });
@@ -1090,6 +1192,7 @@ export async function GET(req: NextRequest) {
       responseBody.brandBreakdown      = brandBreakdown;
       responseBody.agentBreakdown      = agentBreakdown;
       responseBody.conversationsByDate = conversationsByDate;
+      responseBody.weeklyIssueHeatmap  = weeklyIssueHeatmap;
 
       filterOptions.languages  = uniqueLanguages;
       filterOptions.categories = allCategoryLabels;
@@ -1100,7 +1203,6 @@ export async function GET(req: NextRequest) {
       responseBody.pendingEscalations    = { pendingUnder24h, pendingOver24h };
       responseBody.issueSpikes           = issueSpikes;
       responseBody.dissatisfactionTrend  = dissatisfactionTrend;
-      responseBody.weeklyIssueHeatmap    = weeklyIssueHeatmap;
       responseBody.dailyHourlyIssueHeatmap = dailyHourlyIssueHeatmap;
 
       filterOptions.brands    = uniqueBrands;
