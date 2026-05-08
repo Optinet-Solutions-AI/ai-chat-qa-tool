@@ -768,13 +768,32 @@ export default function DashboardPage() {
     return () => controller.abort();
   }, [fetchGlobal]);
 
-  // Manual refresh: bypass both caches and refetch immediately. The Refresh
-  // button is the only entry point — automatic re-runs from filter changes go
-  // through the SWR cache as usual.
-  const refreshAll = useCallback(() => {
+  // Manual refresh: pull latest Asana statuses into the DB, then bypass both
+  // caches and refetch. Mirrors the auto-poll tick so the Refresh button
+  // reflects ticket closures within seconds instead of waiting for the cron.
+  const refreshAll = useCallback(async () => {
+    try {
+      await fetch('/api/dashboard/asana/sync');
+    } catch { /* sync errors shouldn't block the refresh */ }
     fetchScoped(undefined, true);
     fetchGlobal(undefined, true);
   }, [fetchScoped, fetchGlobal]);
+
+  // Auto-poll Asana every 60s while the dashboard is open so the Resolved
+  // counter reflects ticket closures within a minute instead of waiting for
+  // the 15-min cron. Each tick pulls fresh statuses into the DB, then forces
+  // a dashboard refetch. Skips when the tab is hidden to avoid background load.
+  useEffect(() => {
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        await fetch('/api/dashboard/asana/sync');
+      } catch { /* sync errors shouldn't block the refresh */ }
+      refreshAll();
+    };
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, [refreshAll]);
 
   // Loading is the initial cold-start skeleton — true only when neither half
   // has produced data yet. Once data is on screen, filter changes show the
@@ -1039,7 +1058,7 @@ export default function DashboardPage() {
               value={data.escalationStats.totalEscalations}
               accent="cyan"
               icon="doc"
-              onClick={(e) => navToConversations({ asana_ticketed: 'true' }, e)}
+              onClick={(e) => navToConversations({ asana_status: 'open' }, e)}
             />
             <StatCard
               label="Resolved"

@@ -705,10 +705,13 @@ export async function GET(req: NextRequest) {
     const escalatedRows = wantScoped
       ? filteredRows.filter((r) => r.asana_task_gid != null && r.asana_task_deleted_at == null)
       : [];
-    const totalEscalations = escalatedRows.length;
+    const allEscalations = escalatedRows.length;
     const resolvedEscalations = escalatedRows.filter((r) => r.asana_completed_at != null).length;
-    const closureRate = totalEscalations > 0
-      ? Math.round((resolvedEscalations / totalEscalations) * 100)
+    // Total = still-open escalations only. Resolved tickets drop out of this
+    // counter so the card reflects active workload, not lifetime volume.
+    const totalEscalations = allEscalations - resolvedEscalations;
+    const closureRate = allEscalations > 0
+      ? Math.round((resolvedEscalations / allEscalations) * 100)
       : 0;
 
     // Unfiltered open-pending query — small payload, just enough to bucket by age.

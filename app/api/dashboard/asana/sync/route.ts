@@ -43,6 +43,11 @@ export async function GET() {
   const now = new Date().toISOString();
   const updates: Array<{ id: string; completedAt?: string | null; deletedAt?: string | null }> = [];
   let missing = 0;
+  let closedInAsana = 0;
+  let asanaTotalCompleted = 0;
+  for (const s of statuses.values()) {
+    if (s.completed) asanaTotalCompleted += 1;
+  }
   for (const t of tickets) {
     const s = statuses.get(t.asana_task_gid);
     if (!s) {
@@ -53,6 +58,7 @@ export async function GET() {
       updates.push({ id: t.id, deletedAt: now });
       continue;
     }
+    if (s.completed) closedInAsana += 1;
     updates.push({
       id: t.id,
       completedAt: s.completed ? s.completed_at ?? now : null,
@@ -70,5 +76,7 @@ export async function GET() {
     total: tickets.length,
     missing,
     asana_tasks_seen: statuses.size,
+    asana_total_completed: asanaTotalCompleted,
+    closed_in_db: closedInAsana,
   });
 }
