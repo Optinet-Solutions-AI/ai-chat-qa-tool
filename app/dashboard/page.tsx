@@ -86,6 +86,7 @@ interface ScopedDashboardData {
   agentBreakdown: LabelCount[];
   conversationsByDate: DateCount[];
   weeklyIssueHeatmap: WeeklyIssueHeatmap;
+  dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmap;
   filterOptions: { languages: string[]; categories: string[]; issues: { category: string; items: string[] }[] };
 }
 
@@ -93,7 +94,6 @@ interface GlobalDashboardData {
   pendingEscalations: { pendingUnder24h: number; pendingOver24h: number };
   issueSpikes: IssueSpike[];
   dissatisfactionTrend: DissatisfactionTrend;
-  dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmap;
   filterOptions: { brands: string[]; agents: string[]; countries: string[] };
 }
 
@@ -110,7 +110,7 @@ function mergeDashboard(s: ScopedDashboardData, g: GlobalDashboardData): Dashboa
     issueSpikes:             g.issueSpikes,
     dissatisfactionTrend:    g.dissatisfactionTrend,
     weeklyIssueHeatmap:      s.weeklyIssueHeatmap,
-    dailyHourlyIssueHeatmap: g.dailyHourlyIssueHeatmap,
+    dailyHourlyIssueHeatmap: s.dailyHourlyIssueHeatmap,
     resolutionBreakdown:     s.resolutionBreakdown,
     severityBreakdown:       s.severityBreakdown,
     topCategories:           s.topCategories,
@@ -152,9 +152,14 @@ function flooredDate(d: string): string {
 // while a fresh fetch runs in the background. Two namespaces — "scoped" and
 // "global" — let the date-independent half stay cached across date-only filter
 // changes so re-renders feel instant.
+//
+// Bump CACHE_VERSION whenever the payload shape changes so stale cached
+// payloads from a prior deploy are ignored instead of crashing the UI when a
+// newly-required field is read off them.
+const CACHE_VERSION = 'v2';
 function getCachedScoped(key: string): { data: ScopedDashboardData; isStale: boolean } | null {
   try {
-    const raw = localStorage.getItem(`dashboard:scoped:${key}`);
+    const raw = localStorage.getItem(`dashboard:scoped:${CACHE_VERSION}:${key}`);
     if (!raw) return null;
     const { data, fetchedAt } = JSON.parse(raw) as { data: ScopedDashboardData; fetchedAt: number };
     // Skip empty cached payloads — these almost always come from the first
@@ -169,13 +174,13 @@ function getCachedScoped(key: string): { data: ScopedDashboardData; isStale: boo
 
 function setCachedScoped(key: string, data: ScopedDashboardData) {
   try {
-    localStorage.setItem(`dashboard:scoped:${key}`, JSON.stringify({ data, fetchedAt: Date.now() }));
+    localStorage.setItem(`dashboard:scoped:${CACHE_VERSION}:${key}`, JSON.stringify({ data, fetchedAt: Date.now() }));
   } catch { /* ignore quota errors */ }
 }
 
 function getCachedGlobal(key: string): { data: GlobalDashboardData; isStale: boolean } | null {
   try {
-    const raw = localStorage.getItem(`dashboard:global:${key}`);
+    const raw = localStorage.getItem(`dashboard:global:${CACHE_VERSION}:${key}`);
     if (!raw) return null;
     const { data, fetchedAt } = JSON.parse(raw) as { data: GlobalDashboardData; fetchedAt: number };
     return { data, isStale: Date.now() - fetchedAt > CACHE_TTL };
@@ -186,7 +191,7 @@ function getCachedGlobal(key: string): { data: GlobalDashboardData; isStale: boo
 
 function setCachedGlobal(key: string, data: GlobalDashboardData) {
   try {
-    localStorage.setItem(`dashboard:global:${key}`, JSON.stringify({ data, fetchedAt: Date.now() }));
+    localStorage.setItem(`dashboard:global:${CACHE_VERSION}:${key}`, JSON.stringify({ data, fetchedAt: Date.now() }));
   } catch { /* ignore quota errors */ }
 }
 
@@ -1226,11 +1231,11 @@ export default function DashboardPage() {
             </Section>
           </div>
 
-          {/* Row: Top 5 Issues + Weekly Issue Heat Map ─────────── */}
+          {/* Row: Dissatisfaction Trend - Top 5 Issues + Weekly Issue Heat Map ─────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Top 5 Issues — top 5 issues over last 30 days, dissatisfied
+            {/* Dissatisfaction Trend - Top 5 Issues — top 5 issues over last 30 days, dissatisfied
                 conversations only. */}
-            <Section title="Top 5 Issues">
+            <Section title="Dissatisfaction Trend - Top 5 Issues">
               {data.dissatisfactionTrend.issues.length === 0 ? (
                 <Empty message="No dissatisfaction data in the last 30 days" />
               ) : (
@@ -1348,38 +1353,57 @@ export default function DashboardPage() {
           </div>
 
           {/* Daily & Hourly Issue Heat Map — full width ─────────────────── */}
+          {/* Window: scoped 30-day floor that expands with the user's dateFrom,
+              capped at 62 days. The chip row underneath surfaces the issue
+              labels the cells aggregate so the grid isn't a black box. */}
           <Section title="Daily & Hourly Issue Heat Map">
             {data.dailyHourlyIssueHeatmap.dates.length === 0 ? (
               <Empty message="No data available" />
             ) : (
-              <IssueHeatmap
-                rows={data.dailyHourlyIssueHeatmap.dates.map((d) => {
-                  const dt = new Date(d + 'T00:00:00Z');
-                  const label = `${String(dt.getUTCDate()).padStart(2, '0')}-${dt.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
-                  return { key: d, label };
-                })}
-                cols={Array.from({ length: 24 }, (_, h) => ({
-                  key: String(h),
-                  label: String(h).padStart(2, '0'),
-                }))}
-                getValue={(rowKey, colKey) => {
-                  const cell = data.dailyHourlyIssueHeatmap.cells.find((c) => c.date === rowKey && c.hour === parseInt(colKey, 10));
-                  return cell?.count ?? 0;
-                }}
-                showCounts
-                palette="magenta"
-                cellHeight="22px"
-                rowLabelWidth="80px"
-                onCellClick={(rowKey, colKey, _v, e) => navToConversations(
-                  {
-                    dateFrom: rowKey,
-                    dateTo: rowKey,
-                    hour: colKey,
-                    issue_item: data.dailyHourlyIssueHeatmap.topIssues,
-                  },
-                  e,
+              <>
+                <IssueHeatmap
+                  rows={data.dailyHourlyIssueHeatmap.dates.map((d) => {
+                    const dt = new Date(d + 'T00:00:00Z');
+                    const label = `${String(dt.getUTCDate()).padStart(2, '0')}-${dt.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+                    return { key: d, label };
+                  })}
+                  cols={Array.from({ length: 24 }, (_, h) => ({
+                    key: String(h),
+                    label: String(h).padStart(2, '0'),
+                  }))}
+                  getValue={(rowKey, colKey) => {
+                    const cell = data.dailyHourlyIssueHeatmap.cells.find((c) => c.date === rowKey && c.hour === parseInt(colKey, 10));
+                    return cell?.count ?? 0;
+                  }}
+                  showCounts
+                  palette="magenta"
+                  cellHeight="22px"
+                  rowLabelWidth="80px"
+                  onCellClick={(rowKey, colKey, _v, e) => navToConversations(
+                    {
+                      dateFrom: rowKey,
+                      dateTo: rowKey,
+                      hour: colKey,
+                      issue_item: data.dailyHourlyIssueHeatmap.topIssues,
+                    },
+                    e,
+                  )}
+                />
+                {data.dailyHourlyIssueHeatmap.topIssues.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-slate-500">
+                    <span className="font-medium text-slate-400">Issues counted:</span>
+                    {data.dailyHourlyIssueHeatmap.topIssues.map((issue, i) => (
+                      <span key={issue} className="inline-flex items-center gap-1.5">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full"
+                          style={{ background: COLORS[i % COLORS.length] }}
+                        />
+                        {issue}
+                      </span>
+                    ))}
+                  </div>
                 )}
-              />
+              </>
             )}
           </Section>
 

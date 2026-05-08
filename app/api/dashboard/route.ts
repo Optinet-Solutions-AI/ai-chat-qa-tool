@@ -550,60 +550,108 @@ export async function GET(req: NextRequest) {
       (r) => (r.agent_name as string | null)
     );
 
-    // ── Weekly Issue Heat Map (top 5 issues × day-of-week) ───────────────
-    // Aggregates over the user's selected date range, accumulating each
-    // weekday across all matching weeks. When the range is narrower than 7
-    // days the window backfills to dateTo - 6 with an extra DB pull so the
-    // heatmap always shows a full week of context. Columns are ordered with
-    // today's weekday on the right.
+    // ── Issue Heat Maps (Weekly + Daily/Hourly) ───────────────────────────
+    // Two widgets share one accumulation pass:
+    //   • Weekly:        top-N issues × day-of-week, 7-day floor (always backfill
+    //                    to a full week of context).
+    //   • Daily/Hourly:  top-N issues × (date, hour), 30-day floor with a 62-day
+    //                    cap. Expands backward when the user picks a dateFrom
+    //                    older than 30 days, never wider than 2 months.
+    // Both pull from `filteredParsed`; when the user's date filter is narrower
+    // than the wider of the two windows we top up via a single backfill query.
     type WeeklyIssueHeatmapOut = {
       days: { dow: number; label: string }[];
       issues: { issue: string; counts: number[] }[];
     };
+    type DailyHourlyIssueHeatmapOut = {
+      dates: string[];
+      cells: { date: string; hour: number; count: number }[];
+      topIssues: string[];
+    };
     const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const heatmapTodayUTC = new Date().toISOString().slice(0, 10);
     const heatmapTo = (dateTo && dateTo < heatmapTodayUTC) ? dateTo : heatmapTodayUTC;
-    const heatmapFromCandidate = (() => {
-      const d = new Date(heatmapTo + 'T00:00:00Z');
-      d.setUTCDate(d.getUTCDate() - 6);
+    const subtractDays = (anchorDate: string, days: number) => {
+      const d = new Date(anchorDate + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - days);
       return d.toISOString().slice(0, 10);
-    })();
+    };
+    // Weekly heatmap window (7-day floor; extends back when dateFrom is older).
+    const weeklyHeatmapFromCandidate = subtractDays(heatmapTo, 6);
     // Floor at the epoch when dateFrom is null so filteredParsed is never
     // clipped — "no filter" should still aggregate over all loaded data.
     const heatmapFromFloor = dateFrom ?? '1970-01-01';
-    const heatmapFrom = heatmapFromFloor < heatmapFromCandidate ? heatmapFromFloor : heatmapFromCandidate;
-    const heatmapNeedsExtraFetch = wantScoped && dateFrom != null && dateFrom > heatmapFrom;
+    const weeklyHeatmapFrom = heatmapFromFloor < weeklyHeatmapFromCandidate ? heatmapFromFloor : weeklyHeatmapFromCandidate;
+    // Daily/hourly heatmap window: 30-day floor, 62-day cap. Expands with the
+    // user's dateFrom but never goes further than 62 days back so the grid
+    // stays a manageable size as the date range grows.
+    const dailyHourlyMinFrom = subtractDays(heatmapTo, 29);
+    const dailyHourlyMaxFrom = subtractDays(heatmapTo, 61);
+    const dailyHourlyHeatmapFrom = (() => {
+      if (!dateFrom) return dailyHourlyMinFrom;
+      if (dateFrom > dailyHourlyMinFrom) return dailyHourlyMinFrom;
+      if (dateFrom < dailyHourlyMaxFrom) return dailyHourlyMaxFrom;
+      return dateFrom;
+    })();
+    // The backfill range is the union of both windows' starts — daily/hourly is
+    // almost always wider, but `min` keeps the math correct if that ever flips.
+    const unionExtraFrom = weeklyHeatmapFrom < dailyHourlyHeatmapFrom ? weeklyHeatmapFrom : dailyHourlyHeatmapFrom;
+    const heatmapNeedsExtraFetch = wantScoped && dateFrom != null && dateFrom > unionExtraFrom;
     const todayDow = new Date().getUTCDay();
     const dowOrder = Array.from({ length: 7 }, (_, i) => (todayDow - 6 + i + 7) % 7);
     const weeklyAgg: Record<string, { label: string; total: number; perDow: number[]; labelCounts: Record<string, number> }> = {};
+    // Daily/hourly needs two passes (pick top issues, then count cells), so we
+    // collect every row that lands inside its window once and re-walk the list.
+    type DhRow = { iso: string; items: { category: string; item: string }[] };
+    const dailyHourlyRows: DhRow[] = [];
+    const dailyHourlyTotalAgg: Record<string, { total: number; labelCounts: Record<string, number> }> = {};
 
     const accumulateHeatmap = (iso: string, items: { category: string; item: string }[]) => {
       if (!iso) return;
       const dateStr = iso.slice(0, 10);
-      if (dateStr < heatmapFrom || dateStr > heatmapTo) return;
-      const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
-      const seen = new Set<string>();
-      for (const it of items) {
-        if (it.item === 'Unknown') continue;
-        const clean = stripItemNum(it.item);
-        if (!clean) continue;
-        const key = normalizeIssueKey(clean);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (!weeklyAgg[key]) weeklyAgg[key] = { label: clean, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
-        weeklyAgg[key].total += 1;
-        weeklyAgg[key].perDow[dow] += 1;
-        weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
+      if (dateStr > heatmapTo) return;
+      // Weekly accumulation — only rows inside the 7-day window.
+      if (dateStr >= weeklyHeatmapFrom) {
+        const dow = new Date(dateStr + 'T00:00:00Z').getUTCDay();
+        const seen = new Set<string>();
+        for (const it of items) {
+          if (it.item === 'Unknown') continue;
+          const clean = stripItemNum(it.item);
+          if (!clean) continue;
+          const key = normalizeIssueKey(clean);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (!weeklyAgg[key]) weeklyAgg[key] = { label: clean, total: 0, perDow: [0, 0, 0, 0, 0, 0, 0], labelCounts: {} };
+          weeklyAgg[key].total += 1;
+          weeklyAgg[key].perDow[dow] += 1;
+          weeklyAgg[key].labelCounts[clean] = (weeklyAgg[key].labelCounts[clean] ?? 0) + 1;
+        }
+      }
+      // Daily/hourly accumulation — only rows inside the 30-62 day window.
+      if (dateStr >= dailyHourlyHeatmapFrom) {
+        dailyHourlyRows.push({ iso, items });
+        const seen = new Set<string>();
+        for (const it of items) {
+          if (it.item === 'Unknown') continue;
+          const clean = stripItemNum(it.item);
+          if (!clean) continue;
+          const key = normalizeIssueKey(clean);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (!dailyHourlyTotalAgg[key]) dailyHourlyTotalAgg[key] = { total: 0, labelCounts: {} };
+          dailyHourlyTotalAgg[key].total += 1;
+          dailyHourlyTotalAgg[key].labelCounts[clean] = (dailyHourlyTotalAgg[key].labelCounts[clean] ?? 0) + 1;
+        }
       }
     };
 
     for (const p of filteredParsed) accumulateHeatmap(p.iso, p.items);
 
     if (heatmapNeedsExtraFetch) {
-      // Fetch the [heatmapFrom, dateFrom) backfill slice with the same DB
+      // Fetch the [unionExtraFrom, dateFrom) backfill slice with the same DB
       // filters; mirror the in-memory filter cascade so the extra rows obey
       // the same category/issue/severity/etc. constraints as filteredParsed.
-      const extraFromISO = new Date(heatmapFrom + 'T00:00:00Z').toISOString();
+      const extraFromISO = new Date(unionExtraFrom + 'T00:00:00Z').toISOString();
       const extraToISO   = new Date(dateFrom! + 'T00:00:00.000Z').toISOString();
       const extraRows: Array<Record<string, unknown>> = [];
       let idx = 0;
@@ -694,6 +742,55 @@ export async function GET(req: NextRequest) {
     const weeklyIssueHeatmap: WeeklyIssueHeatmapOut = {
       days: dowOrder.map((dow) => ({ dow, label: dayOfWeekLabels[dow] })),
       issues: weeklyTop,
+    };
+
+    // Daily/hourly: pick top issues from totals, then count cells (date×hour).
+    // A conversation flagging multiple top issues counts once per (date, hour),
+    // matching the `topIssues` semantics the cell drill-down relies on.
+    const dailyHourlyTopEntries = Object.entries(dailyHourlyTotalAgg)
+      .sort(([, a], [, b]) => b.total - a.total)
+      .slice(0, hasIssueFilter ? Object.keys(dailyHourlyTotalAgg).length : 5);
+    const dailyHourlyTopKeys = new Set(dailyHourlyTopEntries.map(([k]) => k));
+    const dailyHourlyTopLabels = dailyHourlyTopEntries.map(([, v]) => {
+      const [bestLabel] = Object.entries(v.labelCounts).sort((a, b) => b[1] - a[1])[0];
+      return bestLabel;
+    });
+    const dailyHourlyCells: Record<string, number> = {};
+    for (const r of dailyHourlyRows) {
+      const dateStr = r.iso.slice(0, 10);
+      const hour = new Date(r.iso).getUTCHours();
+      const flagsTop = r.items.some((it) => {
+        if (it.item === 'Unknown') return false;
+        const key = normalizeIssueKey(stripItemNum(it.item));
+        return dailyHourlyTopKeys.has(key);
+      });
+      if (!flagsTop) continue;
+      const cellKey = `${dateStr}|${hour}`;
+      dailyHourlyCells[cellKey] = (dailyHourlyCells[cellKey] ?? 0) + 1;
+    }
+    const allDailyHourlyCells = Object.entries(dailyHourlyCells).map(([k, count]) => {
+      const [date, hourStr] = k.split('|');
+      return { date, hour: parseInt(hourStr, 10), count };
+    });
+    // Build the date axis for the daily/hourly grid from the heatmap window,
+    // then trim leading dates with no data — the window can straddle the
+    // analysis cutoff (ANALYSIS_MIN_DATE_ISO) and rendering empty rows above
+    // the actual data makes the grid look broken.
+    const dailyHourlyDates: string[] = (() => {
+      const out: string[] = [];
+      const start = new Date(dailyHourlyHeatmapFrom + 'T00:00:00Z');
+      const end   = new Date(heatmapTo + 'T00:00:00Z');
+      for (const cur = new Date(start); cur <= end; cur.setUTCDate(cur.getUTCDate() + 1)) {
+        out.push(cur.toISOString().slice(0, 10));
+      }
+      return out;
+    })();
+    const datesWithDailyHourlyData = new Set(allDailyHourlyCells.map((c) => c.date));
+    const firstDailyHourlyIdx = dailyHourlyDates.findIndex((d) => datesWithDailyHourlyData.has(d));
+    const dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmapOut = {
+      dates: firstDailyHourlyIdx <= 0 ? dailyHourlyDates : dailyHourlyDates.slice(firstDailyHourlyIdx),
+      cells: allDailyHourlyCells,
+      topIssues: dailyHourlyTopLabels,
     };
 
     // ── Escalation stats (Asana) ─────────────────────────────────────────
@@ -825,16 +922,7 @@ export async function GET(req: NextRequest) {
       issues: string[];
       data: Array<Record<string, string | number>>;
     };
-    type DailyHourlyIssueHeatmapOut = {
-      dates: string[];
-      cells: { date: string; hour: number; count: number }[];
-      // The display labels of the issues whose conversations are aggregated
-      // into the cells. Sent so the cell drill-down can apply the same
-      // issue_item filter and the modal count matches the cell count exactly.
-      topIssues: string[];
-    };
     let dissatisfactionTrend: DissatisfactionTrendOut = { issues: [], data: [] };
-    let dailyHourlyIssueHeatmap: DailyHourlyIssueHeatmapOut = { dates: [], cells: [], topIssues: [] };
 
     if (wantGlobal && widerRowsPromise) {
       const widerDbRows = await widerRowsPromise;
@@ -967,62 +1055,6 @@ export async function GET(req: NextRequest) {
     dissatisfactionTrend = {
       issues: trendTopIssues.map((t) => t.issue),
       data: firstNonZero <= 0 ? trendDataAllDays : trendDataAllDays.slice(firstNonZero),
-    };
-
-    // ── Daily & Hourly Issue Heat Map (last 30 days × 24 hours) ────────
-    // Top 5 issues over the 30-day window (or selected issues if filter active),
-    // counts per (date, hour) summed across those issues at the conversation
-    // level — a chat that flags multiple top-5 issues counts once per cell.
-    const issueTotalAgg: Record<string, { total: number; labelCounts: Record<string, number> }> = {};
-    for (const p of widerFiltered) {
-      const seen = new Set<string>();
-      for (const it of p.items) {
-        if (it.item === 'Unknown') continue;
-        const clean = stripItemNum(it.item);
-        if (!clean) continue;
-        const key = normalizeIssueKey(clean);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (!issueTotalAgg[key]) issueTotalAgg[key] = { total: 0, labelCounts: {} };
-        issueTotalAgg[key].total += 1;
-        issueTotalAgg[key].labelCounts[clean] = (issueTotalAgg[key].labelCounts[clean] ?? 0) + 1;
-      }
-    }
-    const dailyHourlyTopEntries = Object.entries(issueTotalAgg)
-      .sort(([, a], [, b]) => b.total - a.total)
-      .slice(0, hasIssueFilter ? Object.keys(issueTotalAgg).length : 5);
-    const dailyHourlyTopKeys = new Set(dailyHourlyTopEntries.map(([k]) => k));
-    const dailyHourlyTopLabels = dailyHourlyTopEntries.map(([, v]) => {
-      const [bestLabel] = Object.entries(v.labelCounts).sort((a, b) => b[1] - a[1])[0];
-      return bestLabel;
-    });
-    const dailyHourlyCells: Record<string, number> = {};
-    for (const p of widerFiltered) {
-      if (!p.iso) continue;
-      const dateStr = p.iso.slice(0, 10);
-      const hour = new Date(p.iso).getUTCHours();
-      const flagsTop = p.items.some((it) => {
-        if (it.item === 'Unknown') return false;
-        const key = normalizeIssueKey(stripItemNum(it.item));
-        return dailyHourlyTopKeys.has(key);
-      });
-      if (!flagsTop) continue;
-      const cellKey = `${dateStr}|${hour}`;
-      dailyHourlyCells[cellKey] = (dailyHourlyCells[cellKey] ?? 0) + 1;
-    }
-    const allDailyHourlyCells = Object.entries(dailyHourlyCells).map(([k, count]) => {
-      const [date, hourStr] = k.split('|');
-      return { date, hour: parseInt(hourStr, 10), count };
-    });
-    // Trim leading dates that have no cells at all — same reason as the
-    // trend chart: the 30-day window straddles the analysis cutoff and
-    // empty rows above the data make the grid look broken.
-    const datesWithData = new Set(allDailyHourlyCells.map((c) => c.date));
-    const firstDailyIdx = days30.findIndex((d) => datesWithData.has(d));
-    dailyHourlyIssueHeatmap = {
-      dates: firstDailyIdx <= 0 ? days30 : days30.slice(firstDailyIdx),
-      cells: allDailyHourlyCells,
-      topIssues: dailyHourlyTopLabels,
     };
     } // end if (wantGlobal && widerRowsPromise)
 
@@ -1297,6 +1329,7 @@ export async function GET(req: NextRequest) {
       responseBody.agentBreakdown      = agentBreakdown;
       responseBody.conversationsByDate = conversationsByDate;
       responseBody.weeklyIssueHeatmap  = weeklyIssueHeatmap;
+      responseBody.dailyHourlyIssueHeatmap = dailyHourlyIssueHeatmap;
 
       filterOptions.languages  = uniqueLanguages;
       filterOptions.categories = allCategoryLabels;
@@ -1307,7 +1340,6 @@ export async function GET(req: NextRequest) {
       responseBody.pendingEscalations    = { pendingUnder24h, pendingOver24h };
       responseBody.issueSpikes           = issueSpikes;
       responseBody.dissatisfactionTrend  = dissatisfactionTrend;
-      responseBody.dailyHourlyIssueHeatmap = dailyHourlyIssueHeatmap;
 
       filterOptions.brands    = uniqueBrands;
       filterOptions.agents    = uniqueAgents;
