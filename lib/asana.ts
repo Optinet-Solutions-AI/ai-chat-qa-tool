@@ -30,8 +30,10 @@
 //                    options ("Resolved", "No Action Needed") are managed
 //                    manually inside Asana. Missing options are NOT auto-
 //                    created so this stays a fixed three-state field.
-//   "Severity"     — set to "Severity 1/2/3" based on the AI severity level.
-//                    Missing options are NOT auto-created.
+//   "Severity"     — set to "Severity 0/1/2/3" based on the AI severity level.
+//                    Missing options ARE auto-created. The digit comes from
+//                    normalizeSeverity (clamped to [0123]) so the enum can
+//                    only ever grow to those four options.
 //   "Category"     — set to the first result.category from the AI summary.
 //                    Missing options ARE auto-created since AI labels drift.
 //   "Issue"        — set to the first result.item from the AI summary. Same
@@ -562,9 +564,10 @@ async function getEnumOptionsForField(fieldGid: string): Promise<Map<string, str
 
 // Resolves an enum option for a project field discovered by name. When
 // `autoCreate` is true and the option doesn't exist, a new one is created
-// (used for Category/Issue where AI-produced labels can drift). For fixed
-// option sets like Case Status and Severity pass `autoCreate=false` so a
-// missing option silently skips the field rather than polluting the project.
+// (used for Category/Issue where AI-produced labels can drift, and for
+// Severity where the digit is clamped to [0123] so growth is bounded). For
+// fixed option sets like Case Status pass `autoCreate=false` so a missing
+// option silently skips the field rather than polluting the project.
 async function resolveProjectEnum(
   fieldName: string,
   optionName: string | null,
@@ -983,7 +986,7 @@ export async function createAsanaTaskForConversation(
   const sevDigit = input.severity.match(/\d/)?.[0] ?? null;
   const [caseStatusEnum, severityEnum, categoryEnum, issueEnum] = await Promise.all([
     resolveProjectEnum('Case Status', 'Pending Action', false),
-    sevDigit ? resolveProjectEnum('Severity', `Severity ${sevDigit}`, false) : Promise.resolve(null),
+    sevDigit ? resolveProjectEnum('Severity', `Severity ${sevDigit}`, true) : Promise.resolve(null),
     resolveProjectEnum('Category', input.issueCategories[0] ?? null, true),
     resolveProjectEnum('Issue', input.issueItems[0] ?? null, true),
   ]);
