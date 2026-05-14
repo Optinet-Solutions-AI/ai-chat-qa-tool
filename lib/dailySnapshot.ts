@@ -1008,14 +1008,21 @@ function agentRowHtml(r: AgentRow): string {
   // header sat to the right while the data clustered to the left.)
   // The same href is repeated on each cell's <a> so any click on any cell
   // navigates correctly; visually this reads as a single clickable row.
-  const linkStyle = `text-decoration:none;color:inherit;display:block;`;
+  // Outlook desktop ignores `color:inherit` on <a> and forces its default
+  // blue link color, so each <a> sets an explicit color and the inner text
+  // is also wrapped in a <span> with that same color — Outlook respects the
+  // inner span color even when it overrides the <a>'s.
+  const href = escapeHtml(r.href);
+  const linkBase = `text-decoration:none;display:block;`;
   const cellBase = `border-bottom:1px solid ${COLORS.border};font-family:Arial,Helvetica,sans-serif;`;
+  const linkText = (color: string, content: string) =>
+    `<a href="${href}" style="${linkBase}color:${color};"><span style="color:${color};text-decoration:none;">${content}</span></a>`;
   return `
     <tr>
-      <td width="40" style="padding:10px 14px;font-size:13px;color:${COLORS.text3};${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${escapeHtml(r.rank)}</a></td>
-      <td style="padding:10px 14px;font-size:13px;font-weight:500;color:${COLORS.text1};${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${escapeHtml(r.name)}</a></td>
-      <td align="right" width="80" style="padding:10px 14px;font-size:13px;font-weight:600;color:${COLORS.text1};white-space:nowrap;${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${r.count}</a></td>
-      <td align="right" width="120" style="padding:10px 14px;white-space:nowrap;${cellBase}"><a href="${escapeHtml(r.href)}" style="${linkStyle}">${pillHtml(r.delta)}</a></td>
+      <td width="40" style="padding:10px 14px;font-size:13px;color:${COLORS.text3};${cellBase}">${linkText(COLORS.text3, escapeHtml(r.rank))}</td>
+      <td style="padding:10px 14px;font-size:13px;font-weight:500;color:${COLORS.text1};${cellBase}">${linkText(COLORS.text1, escapeHtml(r.name))}</td>
+      <td align="right" width="80" style="padding:10px 14px;font-size:13px;font-weight:600;color:${COLORS.text1};white-space:nowrap;${cellBase}">${linkText(COLORS.text1, String(r.count))}</td>
+      <td align="right" width="120" style="padding:10px 14px;white-space:nowrap;${cellBase}"><a href="${href}" style="${linkBase}color:${COLORS.text1};">${pillHtml(r.delta)}</a></td>
     </tr>`;
 }
 
