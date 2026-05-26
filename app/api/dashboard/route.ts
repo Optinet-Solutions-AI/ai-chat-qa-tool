@@ -9,6 +9,47 @@ import {
   normalizeSeverity,
 } from '@/lib/analyticsFilters';
 import { getSegment, getVipLevelNum, parseSegmentFilter, parseVipLevelFilter } from '@/lib/utils';
+import { fetchProjectTaskStatuses, isAsanaConfigured } from '@/lib/asana';
+import { dbListAllAsanaTickets, dbBatchUpdateAsanaStatus } from '@/lib/db';
+
+// Self-heal Asana resolution sync. The /api/cron/sync-asana-statuses Vercel cron
+// is supposed to refresh asana_completed_at every 15 min, but if it misses a
+// tick the Resolved counter shows stale "open" tickets even after the AM has
+// closed them in Asana. This piggybacks on dashboard loads to refresh the
+// status within ~1 min of any user opening the page, throttled so concurrent
+// loads share a single Asana sweep.
+let lastAsanaSyncAt = 0;
+let asanaSyncInFlight: Promise<void> | null = null;
+const ASANA_SYNC_INTERVAL_MS = 60_000;
+
+async function runAsanaSyncOnce(): Promise<void> {
+  if (!isAsanaConfigured()) return;
+  try {
+    const tickets = await dbListAllAsanaTickets();
+    if (tickets.length === 0) return;
+    const statuses = await fetchProjectTaskStatuses();
+    const nowIso = new Date().toISOString();
+    const updates = tickets.map((t) => {
+      const s = statuses.get(t.asana_task_gid);
+      if (!s) return { id: t.id, deletedAt: nowIso };
+      return { id: t.id, completedAt: s.completed ? s.completed_at ?? nowIso : null };
+    });
+    await dbBatchUpdateAsanaStatus(updates);
+  } catch (e) {
+    console.error('[dashboard] inline asana sync failed', e);
+  }
+}
+
+async function maybeRunAsanaSync(): Promise<void> {
+  if (asanaSyncInFlight) return asanaSyncInFlight;
+  const now = Date.now();
+  if (now - lastAsanaSyncAt < ASANA_SYNC_INTERVAL_MS) return;
+  lastAsanaSyncAt = now;
+  asanaSyncInFlight = runAsanaSyncOnce().finally(() => {
+    asanaSyncInFlight = null;
+  });
+  return asanaSyncInFlight;
+}
 
 // Display helper: strip "Category N: " prefix, preserving original casing so the
 // label still reads nicely in the UI (normalizeCategoryLabel lowercases for
@@ -61,6 +102,12 @@ export async function GET(req: NextRequest) {
   const countries      = searchParams.getAll('country');
 
   try {
+    // Refresh asana_completed_at before fetching rows so the Resolved counter
+    // reflects tasks closed in Asana since the last cron tick. Throttled to once
+    // per minute and only triggered by the scoped slice (which is where the
+    // escalation counters live).
+    if (wantScoped) await maybeRunAsanaSync();
+
     // Shared DB-level filter — the exact same helper is used by the drill-down
     // in lib/db.ts, which is what keeps the overview counts and the drill-down
     // list counts in lock-step.
