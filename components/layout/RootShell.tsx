@@ -23,6 +23,17 @@ export default function RootShell({ children }: { children: React.ReactNode }) {
     if (stored === 'true') setSidebarCollapsed(true);
   }, []);
 
+  // The login page renders before the user is authenticated, so it must skip
+  // the Sidebar/Header/AppInitializer chrome (AppInitializer fetches /api/db
+  // which would 401 and the sidebar exposes navigation that isn't usable yet).
+  if (pathname === '/login') {
+    return (
+      <ConfirmProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </ConfirmProvider>
+    );
+  }
+
   const handleToggleCollapse = () => {
     setSidebarCollapsed((v) => {
       const next = !v;
