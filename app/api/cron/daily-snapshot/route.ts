@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { buildSnapshot, renderSnapshotHTML, renderSnapshotSubject } from '@/lib/dailySnapshot';
 import { sendEmail, parseRecipients } from '@/lib/email';
+import { getSnapshotRecipients } from '@/lib/users';
 
 // Vercel cron tick — sends the QA Daily Snapshot email to the recipient list.
 // Schedule lives in vercel.json (07:00 UTC daily). Manual equivalent (with
@@ -24,10 +25,14 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const recipients = parseRecipients(process.env.DAILY_SNAPSHOT_RECIPIENTS);
+  // Recipients come from the roster (lib/users.ts — the "Daily Snapshot
+  // Notification" column). DAILY_SNAPSHOT_RECIPIENTS, if set, overrides the
+  // roster for one-off testing.
+  const envRecipients = parseRecipients(process.env.DAILY_SNAPSHOT_RECIPIENTS);
+  const recipients = envRecipients.length > 0 ? envRecipients : getSnapshotRecipients();
   if (recipients.length === 0) {
     return NextResponse.json(
-      { error: 'DAILY_SNAPSHOT_RECIPIENTS env var is empty' },
+      { error: 'No snapshot recipients configured (roster + DAILY_SNAPSHOT_RECIPIENTS both empty)' },
       { status: 500 },
     );
   }

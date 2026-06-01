@@ -91,20 +91,24 @@ function IconTicket() {
   );
 }
 
+// `adminOnly` items are hidden from standard users (the Prompt Library is the
+// "change the prompt" surface). The server still enforces this in app/api/db.
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
   { href: '/report-page', label: 'Report Page', icon: <IconTicket /> },
   { href: '/ask-ai', label: 'Ask AI', icon: <IconSparkle /> },
   { href: '/', label: 'Conversations', icon: <IconChat /> },
   { href: '/collect', label: 'Collect', icon: <IconCollect /> },
-  { href: '/prompts', label: 'Prompt Library', icon: <IconDocument /> },
+  { href: '/prompts', label: 'Prompt Library', icon: <IconDocument />, adminOnly: true },
   { href: '/analysis-history', label: 'Analysis History', icon: <IconHistory /> },
   { href: '/batch-analysis', label: 'Batch Analysis', icon: <IconBatch /> },
 ];
 
 export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
-  const { currentUser } = useStore();
+  const { currentUser, currentRole } = useStore();
+
+  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || currentRole === 'admin');
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/' || pathname.startsWith('/conversations/');
@@ -145,7 +149,7 @@ export default function Sidebar({ isOpen = true, isCollapsed = false, onClose, o
 
         {/* Nav links */}
         <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(({ href, label, icon }) => {
+          {navItems.map(({ href, label, icon }) => {
             const active = isActive(href);
             return (
               <Link

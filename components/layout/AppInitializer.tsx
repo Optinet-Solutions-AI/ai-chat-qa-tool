@@ -1,26 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useStore } from '@/lib/store';
-import WelcomeModal from '@/components/setup/WelcomeModal';
 
 export default function AppInitializer({ children }: { children: React.ReactNode }) {
-  const { loadState, isLoaded, currentUser } = useStore();
-  const [showWelcome, setShowWelcome] = useState(false);
+  const { loadState, isLoaded, setCurrentUser, setCurrentRole } = useStore();
 
   useEffect(() => {
-    loadState().then(() => {
-      const storedUser = localStorage.getItem('qa_user') || '';
-      if (!storedUser) {
-        setShowWelcome(true);
-      }
-    });
+    loadState();
+    // Identity now comes from the login session (qa_auth cookie) rather than a
+    // typed-in name. Pull it from /api/auth/me and seed the store so the avatar,
+    // note attribution, and admin-only UI all reflect the real account.
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me: { username?: string; role?: 'admin' | 'standard' } | null) => {
+        if (me?.username) setCurrentUser(me.username);
+        if (me?.role) setCurrentRole(me.role);
+      })
+      .catch(() => {/* stay logged-out; middleware will redirect protected pages */});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleWelcomeComplete = () => {
-    setShowWelcome(false);
-  };
 
   if (!isLoaded) {
     return (
@@ -33,10 +32,5 @@ export default function AppInitializer({ children }: { children: React.ReactNode
     );
   }
 
-  return (
-    <>
-      {showWelcome && <WelcomeModal onComplete={handleWelcomeComplete} />}
-      {children}
-    </>
-  );
+  return <>{children}</>;
 }

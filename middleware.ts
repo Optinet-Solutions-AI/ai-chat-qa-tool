@@ -33,8 +33,23 @@ export async function middleware(req: NextRequest) {
   }
 
   const token = req.cookies.get(AUTH_COOKIE)?.value;
-  const ok = await verifyToken(secret, token);
-  if (ok) return NextResponse.next();
+  const session = await verifyToken(secret, token);
+
+  if (session) {
+    // Prompt Library is admin-only ("can change the prompt"). Standard users
+    // who navigate to it directly are bounced to the home page. The matching
+    // prompt-mutating API is gated server-side in app/api/db (the real guard).
+    if (
+      session.role !== 'admin' &&
+      (pathname === '/prompts' || pathname.startsWith('/prompts/'))
+    ) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
 
   if (pathname.startsWith('/api/')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

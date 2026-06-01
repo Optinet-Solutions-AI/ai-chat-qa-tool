@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { AUTH_COOKIE, SESSION_TTL_MS, signToken } from '@/lib/auth';
+import { findUser } from '@/lib/users';
 
 export const runtime = 'nodejs';
 
@@ -12,11 +13,22 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// Passwords live in the APP_USERS env var as JSON { username: password }.
+// Roles/emails come from the committed roster in lib/users.ts.
+function parseAppUsers(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? (obj as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function POST(req: Request) {
-  const expectedUser = process.env.APP_USERNAME;
-  const expectedPass = process.env.APP_PASSWORD;
   const secret = process.env.AUTH_SECRET;
-  if (!expectedUser || !expectedPass || !secret) {
+  const passwords = parseAppUsers(process.env.APP_USERS);
+  if (!secret || Object.keys(passwords).length === 0) {
     return NextResponse.json({ error: 'Auth not configured' }, { status: 500 });
   }
 
@@ -29,15 +41,19 @@ export async function POST(req: Request) {
 
   const providedUser = typeof body.username === 'string' ? body.username.trim() : '';
   const providedPass = typeof body.password === 'string' ? body.password : '';
-  // Compare both fields unconditionally so timing doesn't leak which one failed.
-  const userOk = timingSafeEqual(providedUser, expectedUser);
-  const passOk = timingSafeEqual(providedPass, expectedPass);
-  if (!userOk || !passOk) {
+
+  // Resolve the canonical roster entry (case-insensitive username). When the
+  // user is unknown we still run a constant-time compare against a dummy so
+  // response timing doesn't reveal whether the username exists.
+  const user = findUser(providedUser);
+  const expectedPass = user ? passwords[user.username] : undefined;
+  const passOk = timingSafeEqual(providedPass, expectedPass ?? '\0invalid');
+  if (!user || !expectedPass || !passOk) {
     return NextResponse.json({ error: 'Wrong username or password' }, { status: 401 });
   }
 
   const expiry = Date.now() + SESSION_TTL_MS;
-  const token = await signToken(secret, expiry);
+  const token = await signToken(secret, { username: user.username, role: user.role, expiryMs: expiry });
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set({

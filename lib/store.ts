@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import type { Conversation, ConversationNote, PromptVersion } from './types';
+import type { Role } from './users';
 import { loadFromSupabase } from './db-client';
 
 const USER_KEY = 'qa_user';
@@ -10,9 +11,13 @@ interface AppState {
   conversations: Conversation[];
   prompts: PromptVersion[];
   currentUser: string;
+  // Access role of the logged-in user, sourced from /api/auth/me. Empty until
+  // identity loads; gates admin-only UI (e.g. the Prompt Library nav item).
+  currentRole: Role | '';
   isLoaded: boolean;
 
   setCurrentUser: (name: string) => void;
+  setCurrentRole: (role: Role | '') => void;
 
   // Conversations
   addConversation: (c: Conversation) => void;
@@ -37,6 +42,7 @@ export const useStore = create<AppState>((set) => ({
   conversations: [],
   prompts: [],
   currentUser: '',
+  currentRole: '',
   isLoaded: false,
 
   setCurrentUser: (name) => {
@@ -44,6 +50,10 @@ export const useStore = create<AppState>((set) => ({
     if (typeof window !== 'undefined') {
       localStorage.setItem(USER_KEY, name);
     }
+  },
+
+  setCurrentRole: (role) => {
+    set({ currentRole: role });
   },
 
   addConversation: (c) => {
