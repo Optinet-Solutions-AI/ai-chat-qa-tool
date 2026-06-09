@@ -321,6 +321,22 @@ async function getProjectSections(): Promise<Map<string, string>> {
   }
 }
 
+// Board column used for escalations whose AM can't be resolved from the
+// player's Intercom groups. Auto-created on first use, same as AM columns.
+const UNASSIGNED_SECTION_NAME = 'Unassigned';
+
+// True if the given section gid is still a live section in the project. Used to
+// guard the ASANA_SECTION_GID env fallback — Asana ignores an unknown section
+// gid silently, so a stale value would otherwise route tickets to the default
+// (first) column instead of where we intended.
+async function isLiveSection(gid: string): Promise<boolean> {
+  const sections = await getProjectSections();
+  for (const v of sections.values()) {
+    if (v === gid) return true;
+  }
+  return false;
+}
+
 // Resolves an AM name to a section gid using exact-match then first-word.
 // Returns null when no column matches — the caller decides the fallback.
 async function resolveSectionForAccountManager(amName: string | null): Promise<string | null> {
@@ -955,13 +971,30 @@ export async function createAsanaTaskForConversation(
   const token = process.env.ASANA_ACCESS_TOKEN!;
   const projectGid = process.env.ASANA_PROJECT_GID!;
 
-  // Per-ticket routing: find or auto-create the column matching the AM.
-  // ASANA_SECTION_GID is only used as a last-resort fallback when ensure
-  // fails (rate limit / perms / no AM name).
-  const ensuredSection = await ensureSectionForAccountManager(input.accountManager);
-  const sectionGid = ensuredSection ?? process.env.ASANA_SECTION_GID ?? null;
-  if (!ensuredSection && input.accountManager) {
-    console.warn(`[asana] could not ensure section for account manager: ${input.accountManager}`);
+  // Per-ticket routing: find or auto-create the column matching the AM. When
+  // the AM can't be resolved (missing/unknown AM group), route to a dedicated
+  // "Unassigned" column so the escalation stays visible and triageable instead
+  // of silently landing in whatever the board's first column happens to be.
+  //
+  // We deliberately do NOT blindly trust ASANA_SECTION_GID as the fallback:
+  // Asana silently ignores an unknown section gid (rather than erroring), so a
+  // stale/deleted value there routes the task into the leftmost column — which
+  // is how no-AM tickets ended up piling onto the first AM ("Christian"). The
+  // env gid is only honored when it still resolves to a live section.
+  let sectionGid = await ensureSectionForAccountManager(input.accountManager);
+  if (!sectionGid) {
+    if (input.accountManager) {
+      console.warn(`[asana] could not ensure section for account manager: ${input.accountManager}; routing to ${UNASSIGNED_SECTION_NAME}`);
+    }
+    sectionGid = await ensureSectionForAccountManager(UNASSIGNED_SECTION_NAME);
+  }
+  if (!sectionGid) {
+    const envGid = process.env.ASANA_SECTION_GID ?? null;
+    if (envGid && (await isLiveSection(envGid))) {
+      sectionGid = envGid;
+    } else if (envGid) {
+      console.warn(`[asana] ASANA_SECTION_GID ${envGid} is not a live section; creating the ticket unsectioned`);
+    }
   }
 
   // AM custom-field option (kept as a redundant filter axis alongside the AM

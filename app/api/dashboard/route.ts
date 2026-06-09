@@ -29,12 +29,23 @@ async function runAsanaSyncOnce(): Promise<void> {
     if (tickets.length === 0) return;
     const statuses = await fetchProjectTaskStatuses();
     const nowIso = new Date().toISOString();
-    const updates = tickets.map((t) => {
+    // Only enqueue rows whose open/closed state actually flipped (or that
+    // vanished from Asana). Rewriting all 1000+ rows every load is what
+    // saturated the pool and stalled the sync — see dbBatchUpdateAsanaStatus.
+    const updates: Array<{ id: string; completedAt?: string | null; deletedAt?: string | null }> = [];
+    for (const t of tickets) {
       const s = statuses.get(t.asana_task_gid);
-      if (!s) return { id: t.id, deletedAt: nowIso };
-      return { id: t.id, completedAt: s.completed ? s.completed_at ?? nowIso : null };
-    });
-    await dbBatchUpdateAsanaStatus(updates);
+      if (!s) {
+        updates.push({ id: t.id, deletedAt: nowIso });
+        continue;
+      }
+      const wantClosed = s.completed;
+      const isClosed = t.completedAt != null;
+      if (wantClosed !== isClosed) {
+        updates.push({ id: t.id, completedAt: wantClosed ? s.completed_at ?? nowIso : null });
+      }
+    }
+    if (updates.length > 0) await dbBatchUpdateAsanaStatus(updates);
   } catch (e) {
     console.error('[dashboard] inline asana sync failed', e);
   }

@@ -44,16 +44,23 @@ export async function GET(req: NextRequest) {
       updates.push({ id: t.id, deletedAt: now });
       continue;
     }
-    updates.push({
-      id: t.id,
-      completedAt: s.completed ? s.completed_at ?? now : null,
-    });
+    // Only write when the open/closed state actually flips. Comparing on
+    // null-ness (not the exact timestamp) avoids rewriting every row each tick
+    // just because Asana's completed_at string differs in format from the
+    // stored one — that needless 1000+-row write storm is what saturated the
+    // pool and timed the sync out.
+    const wantClosed = s.completed;
+    const isClosed = t.completedAt != null;
+    if (wantClosed !== isClosed) {
+      updates.push({ id: t.id, completedAt: wantClosed ? s.completed_at ?? now : null });
+    }
   }
 
-  await dbBatchUpdateAsanaStatus(updates);
+  const { updated, failed } = await dbBatchUpdateAsanaStatus(updates);
 
   return NextResponse.json({
-    synced: updates.length,
+    synced: updated,
+    failed,
     total: tickets.length,
     missing,
     asana_tasks_seen: statuses.size,

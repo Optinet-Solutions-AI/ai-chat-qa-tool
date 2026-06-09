@@ -1138,22 +1138,22 @@ export async function dbCountAsanaTickets(): Promise<number> {
 // completion back onto our rows. Tickets already flagged deleted are
 // skipped — once gone in Asana, we stop polling for them every cron tick.
 export async function dbListAllAsanaTickets(): Promise<
-  Array<{ id: string; asana_task_gid: string }>
+  Array<{ id: string; asana_task_gid: string; completedAt: string | null }>
 > {
   const PAGE = 1000;
-  const out: Array<{ id: string; asana_task_gid: string }> = [];
+  const out: Array<{ id: string; asana_task_gid: string; completedAt: string | null }> = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
       .from('conversations')
-      .select('id, asana_task_gid')
+      .select('id, asana_task_gid, asana_completed_at')
       .not('asana_task_gid', 'is', null)
       .is('asana_task_deleted_at', null)
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`[db] list asana tickets: ${error.message}`);
-    const rows = (data ?? []) as Array<{ id: string; asana_task_gid: string | null }>;
+    const rows = (data ?? []) as Array<{ id: string; asana_task_gid: string | null; asana_completed_at: string | null }>;
     for (const r of rows) {
-      if (r.asana_task_gid) out.push({ id: r.id, asana_task_gid: r.asana_task_gid });
+      if (r.asana_task_gid) out.push({ id: r.id, asana_task_gid: r.asana_task_gid, completedAt: r.asana_completed_at });
     }
     if (rows.length < PAGE) break;
     from += PAGE;
@@ -1309,23 +1309,46 @@ export async function dbBatchUpdateAsanaStatus(
     completedAt?: string | null;
     deletedAt?: string | null;
   }>,
-): Promise<void> {
-  if (updates.length === 0) return;
-  await Promise.all(
-    updates.map(({ id, completedAt, deletedAt }) => {
-      const fields: Record<string, string | null> = {};
-      if (completedAt !== undefined) fields.asana_completed_at = completedAt;
-      if (deletedAt !== undefined)   fields.asana_task_deleted_at = deletedAt;
-      if (Object.keys(fields).length === 0) return Promise.resolve();
-      return supabase
-        .from('conversations')
-        .update(fields)
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) throw new Error(`[db] update asana status (${id}): ${error.message}`);
-        });
-    }),
-  );
+): Promise<{ updated: number; failed: number }> {
+  if (updates.length === 0) return { updated: 0, failed: 0 };
+  // Bounded concurrency: the project carries 1000+ live tickets, and firing
+  // every UPDATE at once (a single Promise.all over the whole set) saturates the
+  // Supabase/PgBouncer pool — individual statements then hit the DB
+  // statement_timeout (57014). Process in fixed-size chunks instead.
+  //
+  // Per-row resilience: a single row's failure (e.g. a transient timeout under
+  // load) must NOT abort the whole sweep. The previous Promise.all rejected on
+  // the first failure, rolling back every other valid update and 500-ing the
+  // cron — so the dashboard counts stayed stale indefinitely. We now apply
+  // every row we can, count failures, and let the next tick retry stragglers
+  // (the write is idempotent).
+  const CHUNK = 50;
+  let updated = 0;
+  let failed = 0;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const results = await Promise.allSettled(
+      updates.slice(i, i + CHUNK).map(async ({ id, completedAt, deletedAt }) => {
+        const fields: Record<string, string | null> = {};
+        if (completedAt !== undefined) fields.asana_completed_at = completedAt;
+        if (deletedAt !== undefined)   fields.asana_task_deleted_at = deletedAt;
+        if (Object.keys(fields).length === 0) return;
+        const { error } = await supabase.from('conversations').update(fields).eq('id', id);
+        if (error) throw new Error(`update (${id}): ${error.message}`);
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        updated += 1;
+      } else {
+        failed += 1;
+        console.error('[db] asana status update failed:', r.reason instanceof Error ? r.reason.message : r.reason);
+      }
+    }
+  }
+  if (failed > 0) {
+    console.warn(`[db] asana status sync: ${updated} ok, ${failed} failed (idempotent — retried next tick)`);
+  }
+  return { updated, failed };
 }
 
 // ── Load all state ─────────────────────────────────────────────────────────
