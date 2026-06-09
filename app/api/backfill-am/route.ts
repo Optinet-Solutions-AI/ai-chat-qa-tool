@@ -1,27 +1,20 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { GROUP_TO_AM, normalizeGroupName } from '@/lib/utils';
+import { amFromGroups } from '@/lib/utils';
 
 // Allow up to 5 minutes for large datasets
 export const maxDuration = 300;
 
-function deriveAm(playerTags: string[], playerSegments: string[], tags: string[], companyNames: string[]): string | null {
-  const allGroups = [...playerTags, ...playerSegments, ...tags, ...companyNames];
-  const normalizedGroups = allGroups.map(normalizeGroupName);
-  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
-  for (const [group, am] of Object.entries(GROUP_TO_AM)) {
-    if (group === 'softswiss') continue;
-    if (normalizedGroups.includes(group)) return am;
-  }
-  return null;
-}
-
 export async function POST() {
-  let updated = 0;
-  let skipped = 0;
-  let page = 0;
   const pageSize = 500;
 
+  // Read ALL null-AM rows first, then write — writing as we paginate would set
+  // account_manager non-null and shift rows out of the `is null` filter, making
+  // the offset cursor skip unread rows. Derivation uses the shared groups-first
+  // resolver so the backfilled value matches what getAccountManager reads.
+  const toUpdate: Array<{ id: string; am: string }> = [];
+  let skipped = 0;
+  let page = 0;
   while (true) {
     const { data, error } = await supabase
       .from('conversations')
@@ -34,27 +27,28 @@ export async function POST() {
 
     for (const row of data) {
       const companyNames = (row.player_companies ?? []).map((c: { name?: string }) => c.name ?? '');
-      const am = deriveAm(
-        row.player_tags ?? [],
-        row.player_segments ?? [],
-        row.tags ?? [],
-        companyNames,
-      );
-
-      if (am) {
-        const { error: updateError } = await supabase
-          .from('conversations')
-          .update({ account_manager: am })
-          .eq('id', row.id);
-        if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
-        updated++;
-      } else {
-        skipped++;
-      }
+      const am = amFromGroups([
+        ...(row.player_tags ?? []),
+        ...(row.player_segments ?? []),
+        ...(row.tags ?? []),
+        ...companyNames,
+      ]);
+      if (am) toUpdate.push({ id: row.id, am });
+      else skipped++;
     }
 
     if (data.length < pageSize) break;
     page++;
+  }
+
+  let updated = 0;
+  for (const { id, am } of toUpdate) {
+    const { error: updateError } = await supabase
+      .from('conversations')
+      .update({ account_manager: am })
+      .eq('id', id);
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+    updated++;
   }
 
   return NextResponse.json({ updated, skipped });

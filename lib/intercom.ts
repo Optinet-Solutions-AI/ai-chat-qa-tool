@@ -1,5 +1,5 @@
 import type { ConversationFetchResult, PlayerCompany, PlayerEventSummary, RawMessage } from './types';
-import { GROUP_TO_AM, normalizeGroupName } from './utils';
+import { amFromGroups } from './utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -364,18 +364,19 @@ export async function fetchIntercomData(
     transcript: truncated,
     raw_messages: rawMessages,
     account_manager: (() => {
+      // Groups-first, via the shared resolver, so the stored value matches what
+      // getAccountManager / the dashboard derive at read time. (Previously this
+      // checked the custom attribute first and SoftSwiss before AM groups, which
+      // mislabeled SoftSwiss-brand players who are personally managed by an AM.)
+      const convTags = (conv.tags?.tags ?? []).map((t) => t.name);
+      const fromGroups = amFromGroups([...playerTags, ...playerSegments, ...convTags, ...playerCompanies.map((c) => c.name)]);
+      if (fromGroups) return fromGroups;
+      // Fall back to an explicit Intercom "Account Manager" custom attribute only
+      // when no group resolves.
       const customAttrs = contact?.custom_attributes ?? {};
       for (const key of ['Account Manager', 'account_manager', 'AccountManager', 'AM', 'Account Mgr']) {
         const v = customAttrs[key];
         if (v != null && v !== '') return String(v);
-      }
-      const convTags = (conv.tags?.tags ?? []).map((t) => t.name);
-      const allGroups = [...playerTags, ...playerSegments, ...convTags, ...playerCompanies.map((c) => c.name)];
-      const normalizedGroups = allGroups.map(normalizeGroupName);
-      if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
-      for (const [group, am] of Object.entries(GROUP_TO_AM)) {
-        if (group === 'softswiss') continue;
-        if (normalizedGroups.includes(group)) return am;
       }
       return null;
     })(),

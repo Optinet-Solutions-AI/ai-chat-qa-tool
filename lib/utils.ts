@@ -106,6 +106,24 @@ export function getAmGroupsForFilter(am: string): string[] {
     .map(([group]) => group);
 }
 
+// THE authoritative group→AM resolver. Groups-first: an explicit VIP_<am> /
+// NON-VIP_<am> assignment beats SoftSwiss platform membership (a SoftSwiss-brand
+// player can still be personally managed by an AM, e.g. tagged vip_koko).
+// Returns null when no group resolves. Collection-time derivation (lib/intercom)
+// and the AM backfill MUST call this rather than re-implementing the precedence —
+// otherwise the stored account_manager cache drifts out of sync with what this
+// function (and the dashboard) reads. Accepts already-raw group strings; it
+// normalizes them here.
+export function amFromGroups(groups: string[]): string | null {
+  const normalizedGroups = groups.map(normalizeGroupName);
+  for (const [group, am] of Object.entries(GROUP_TO_AM)) {
+    if (group === 'softswiss') continue;
+    if (normalizedGroups.includes(group)) return am;
+  }
+  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
+  return null;
+}
+
 // Structural shape used by both getSegment and getVipLevelNum so callers can
 // pass slim row objects (dashboard analytics, drill-down filter) without
 // having to construct a full Conversation.
@@ -211,21 +229,13 @@ export function getAccountManager(conv: Conversation): string | null {
   // Prefer the stored column (populated at collection time for all sources)
   // Derive from group membership first — works for both new and legacy rows
   const companyNames = (conv.player_companies ?? []).map((c) => c.name);
-  const allGroups = [
+  const fromGroups = amFromGroups([
     ...(conv.player_tags ?? []),
     ...(conv.player_segments ?? []),
     ...(conv.tags ?? []),
     ...companyNames,
-  ];
-  const normalizedGroups = allGroups.map(normalizeGroupName);
-  // An explicit VIP_<am> / NON-VIP_<am> AM assignment beats SoftSwiss platform
-  // group membership: a player on a SoftSwiss-platform brand can still be
-  // personally managed by an AM (e.g. RocketSpin player tagged vip_koko).
-  for (const [group, am] of Object.entries(GROUP_TO_AM)) {
-    if (group === 'softswiss') continue;
-    if (normalizedGroups.includes(group)) return am;
-  }
-  if (normalizedGroups.some((n) => n === 'softswiss' || n.startsWith('softswiss '))) return GROUP_TO_AM['softswiss'];
+  ]);
+  if (fromGroups) return fromGroups;
   // Fall back to stored value (custom attribute or pre-migration cached name)
   const fromAttrs = getCustomAttr(
     conv.player_custom_attributes,
