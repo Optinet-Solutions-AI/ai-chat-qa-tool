@@ -823,25 +823,33 @@ function buildTaskNotes(input: AsanaTaskInput): string {
   return lines.join('\n');
 }
 
-// Fetches { gid → { completed, completed_at } } for every task in the
-// configured project. Pagination uses Asana's offset cursor; each page is up
-// to 100 tasks. Used by /api/admin/sync-asana-statuses to refresh open/closed
-// counts on the reporting page in one project-level sweep instead of N
-// per-task GETs.
-export async function fetchProjectTaskStatuses(): Promise<
-  Map<string, { completed: boolean; completed_at: string | null }>
-> {
-  const map = new Map<string, { completed: boolean; completed_at: string | null }>();
-  if (!isAsanaConfigured()) return map;
+export type OpenTask = { gid: string; section: string | null };
+
+// Lists the project's currently-OPEN (incomplete) tasks with the board column
+// (section) each one sits in. `completed_since=now` is the documented Asana
+// trick to return only incomplete tasks — so this sweep is bounded by the live
+// open set (tens of tasks) and does NOT grow with the project's completed-task
+// history. That history-independence is the whole point: the previous
+// fetch-every-task sweep slowed as completed tasks piled up until it blew past
+// the cron's maxDuration and silently stopped writing completions back.
+//
+// Section comes from the membership whose project matches ours (a task can live
+// in several projects). Used by the Telegram snapshot (group by column) and by
+// the status sync (which gids are still open).
+export async function fetchOpenProjectTasks(): Promise<OpenTask[]> {
+  const out: OpenTask[] = [];
+  if (!isAsanaConfigured()) return out;
   const token = process.env.ASANA_ACCESS_TOKEN!;
   const projectGid = process.env.ASANA_PROJECT_GID!;
+  const completedSince = new Date().toISOString();
 
   let offset: string | null = null;
   // Hard cap to keep a misbehaving paginator from looping forever.
   for (let page = 0; page < 100; page++) {
     const params = new URLSearchParams({
       limit: '100',
-      opt_fields: 'completed,completed_at',
+      completed_since: completedSince,
+      opt_fields: 'memberships.project,memberships.section.name',
     });
     if (offset) params.set('offset', offset);
     const url = `${ASANA_API}/projects/${projectGid}/tasks?${params.toString()}`;
@@ -850,25 +858,66 @@ export async function fetchProjectTaskStatuses(): Promise<
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`[asana] list project tasks failed (${res.status}): ${body.slice(0, 300)}`);
+      throw new Error(`[asana] list open project tasks failed (${res.status}): ${body.slice(0, 300)}`);
     }
     const json = await res.json();
     for (const t of (json?.data ?? []) as Array<{
       gid?: string;
-      completed?: boolean;
-      completed_at?: string | null;
+      memberships?: Array<{ project?: { gid?: string }; section?: { name?: string } | null }>;
     }>) {
-      if (t?.gid) {
-        map.set(t.gid, {
-          completed: !!t.completed,
-          completed_at: t.completed_at ?? null,
-        });
-      }
+      if (!t?.gid) continue;
+      const mine = (t.memberships ?? []).find((m) => m?.project?.gid === projectGid);
+      out.push({ gid: t.gid, section: mine?.section?.name ?? null });
     }
     offset = json?.next_page?.offset ?? null;
     if (!offset) break;
   }
-  return map;
+  return out;
+}
+
+export type TaskCompletion =
+  | { exists: false }
+  | { exists: true; completed: boolean; completed_at: string | null };
+
+// Resolves completed-vs-deleted for a small set of gids that have just left the
+// open set, via per-task GETs (bounded concurrency). A 404 means the task was
+// deleted in Asana; otherwise we trust its `completed` flag. Only ever called
+// on the close delta, so the request count stays tiny in steady state.
+export async function fetchTasksCompletion(
+  gids: string[],
+): Promise<Map<string, TaskCompletion>> {
+  const result = new Map<string, TaskCompletion>();
+  if (!isAsanaConfigured() || gids.length === 0) return result;
+  const token = process.env.ASANA_ACCESS_TOKEN!;
+
+  const CONCURRENCY = 10;
+  for (let i = 0; i < gids.length; i += CONCURRENCY) {
+    const slice = gids.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      slice.map(async (gid) => {
+        const url = `${ASANA_API}/tasks/${gid}?opt_fields=completed,completed_at`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        if (res.status === 404) {
+          result.set(gid, { exists: false });
+          return;
+        }
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`[asana] get task ${gid} failed (${res.status}): ${body.slice(0, 200)}`);
+        }
+        const json = await res.json();
+        const t = json?.data ?? {};
+        result.set(gid, {
+          exists: true,
+          completed: !!t.completed,
+          completed_at: t.completed_at ?? null,
+        });
+      }),
+    );
+  }
+  return result;
 }
 
 // Public Asana-push trigger callable from any analysis path. Re-fetches the

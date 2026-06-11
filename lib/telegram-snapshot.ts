@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import { getAccountManager, GROUP_TO_AM } from '@/lib/utils';
-import type { Conversation } from '@/lib/types';
+import { GROUP_TO_AM } from '@/lib/utils';
+import { fetchOpenProjectTasks } from '@/lib/asana';
 
 // Built once at module load from GROUP_TO_AM so both maps stay in sync with
 // the routing matrix automatically:
@@ -65,15 +65,27 @@ function descriptorForAm(am: string): string | null {
 }
 
 // Builds and posts the "Pending Action Cases Snapshot" the cron sends to
-// Telegram. "Pending" matches the dashboard's escalationStats card: an Asana
-// ticket exists, isn't deleted in Asana, and isn't completed yet.
+// Telegram. "Pending" = open on the Asana board right now.
 //
-// Age uses intercom_created_at rather than analyzed_at on purpose: analyzed_at
-// gets re-stamped whenever a row is re-analyzed (e.g. the gpt-4o re-analysis
-// sweeps), which would otherwise reset open tickets to "<24h" the moment a
-// re-analysis completes. intercom_created_at is stable, and slightly
-// overstates ticket age (since the ticket is created at analysis time, not at
-// conversation creation), which is the safer bias for an AM-facing SLA view.
+// Source of truth is the live Asana board, NOT the asana_completed_at column.
+// We pull the project's open (incomplete) tasks straight from Asana and group
+// each by the section (board column) it physically sits in, so every row
+// matches the column an AM sees on the board 1:1. Management reads this Telegram
+// post instead of opening Asana, so it has to agree with the board exactly.
+//
+// Two earlier mismatches this design removes:
+//   - Inflation: reading asana_completed_at meant any completion the */15 sync
+//     hadn't written back still counted as pending (108 posted vs ~34 on the
+//     board). Asking Asana directly can't go stale.
+//   - Per-AM scatter: the old code re-derived the AM live from the player's
+//     current Intercom groups, so a player who changed segment landed under a
+//     different name than the column the ticket was created in. Grouping by the
+//     actual section fixes that.
+//
+// Age still uses intercom_created_at (looked up from the DB by gid) rather than
+// analyzed_at: analyzed_at gets re-stamped on every re-analysis (e.g. the gpt-4o
+// sweeps), which would reset open tickets to "<24h"; intercom_created_at is
+// stable and biases slightly old, which is the safe direction for an SLA view.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -86,32 +98,21 @@ export type Snapshot = {
 };
 
 export async function buildPendingSnapshot(now: Date = new Date()): Promise<Snapshot> {
-  const PAGE_SIZE = 1000;
-  const rows: Array<Record<string, unknown>> = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select(
-        'id, account_manager, intercom_created_at, player_tags, player_segments, tags, player_companies, player_custom_attributes',
-      )
-      .not('asana_task_gid', 'is', null)
-      .is('asana_task_deleted_at', null)
-      .is('asana_completed_at', null)
-      .order('id', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(`[telegram-snapshot] ${error.message}`);
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
+  // 1. The board truth: which tasks are open right now, and in which column.
+  const openTasks = await fetchOpenProjectTasks();
 
+  // 2. Look up intercom_created_at for those gids (for the <24h / >24h split).
+  const gids = openTasks.map((t) => t.gid);
+  const createdByGid = await fetchCreatedAtByGid(gids);
+
+  // 3. Group by section name (= board column = AM); bucket by age. A task with
+  //    no section in our project, or a section we don't recognise, lands under
+  //    "Unassigned" so the total still equals the board total.
   const nowMs = now.getTime();
   const byAm = new Map<string, AmCounts>();
-  for (const r of rows) {
-    const am = getAccountManager(r as unknown as Conversation) ?? 'Unassigned';
-    const created = r.intercom_created_at as string | null;
+  for (const t of openTasks) {
+    const am = t.section?.trim() || 'Unassigned';
+    const created = createdByGid.get(t.gid) ?? null;
     const ageMs = created ? nowMs - new Date(created).getTime() : Infinity;
     const bucket = byAm.get(am) ?? { under24: 0, over24: 0 };
     if (ageMs < DAY_MS) bucket.under24 += 1;
@@ -119,7 +120,28 @@ export async function buildPendingSnapshot(now: Date = new Date()): Promise<Snap
     byAm.set(am, bucket);
   }
 
-  return { total: rows.length, byAm, message: formatSnapshot(byAm, rows.length, now) };
+  return { total: openTasks.length, byAm, message: formatSnapshot(byAm, openTasks.length, now) };
+}
+
+// Returns gid → intercom_created_at for the given Asana task gids. Chunked IN
+// query so a large open set can't blow the URL/param limit. Tickets always
+// originate from a conversation, so a gid normally resolves; one that doesn't
+// just gets no age (→ >24h bucket) and is still counted.
+async function fetchCreatedAtByGid(gids: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const CHUNK = 200;
+  for (let i = 0; i < gids.length; i += CHUNK) {
+    const slice = gids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('asana_task_gid, intercom_created_at')
+      .in('asana_task_gid', slice);
+    if (error) throw new Error(`[telegram-snapshot] ${error.message}`);
+    for (const r of (data ?? []) as Array<{ asana_task_gid: string | null; intercom_created_at: string | null }>) {
+      if (r.asana_task_gid) out.set(r.asana_task_gid, r.intercom_created_at);
+    }
+  }
+  return out;
 }
 
 function formatSnapshot(byAm: Map<string, AmCounts>, total: number, now: Date): string {
@@ -174,6 +196,7 @@ function formatSnapshot(byAm: Map<string, AmCounts>, total: number, now: Date): 
   }
 
   lines.push(BOT);
+  lines.push('🔄 Live from the Asana board');
   return lines.join('\n');
 }
 

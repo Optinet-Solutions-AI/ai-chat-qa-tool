@@ -9,15 +9,16 @@ import {
   normalizeSeverity,
 } from '@/lib/analyticsFilters';
 import { getSegment, getVipLevelNum, parseSegmentFilter, parseVipLevelFilter } from '@/lib/utils';
-import { fetchProjectTaskStatuses, isAsanaConfigured } from '@/lib/asana';
-import { dbListAllAsanaTickets, dbBatchUpdateAsanaStatus } from '@/lib/db';
+import { isAsanaConfigured } from '@/lib/asana';
+import { reconcileAsanaStatuses } from '@/lib/asana-sync';
 
 // Self-heal Asana resolution sync. The /api/cron/sync-asana-statuses Vercel cron
 // is supposed to refresh asana_completed_at every 15 min, but if it misses a
 // tick the Resolved counter shows stale "open" tickets even after the AM has
 // closed them in Asana. This piggybacks on dashboard loads to refresh the
 // status within ~1 min of any user opening the page, throttled so concurrent
-// loads share a single Asana sweep.
+// loads share a single Asana sweep. Shares reconcileAsanaStatuses() with the
+// cron + admin paths so all four sync entry points behave identically.
 let lastAsanaSyncAt = 0;
 let asanaSyncInFlight: Promise<void> | null = null;
 const ASANA_SYNC_INTERVAL_MS = 60_000;
@@ -25,27 +26,7 @@ const ASANA_SYNC_INTERVAL_MS = 60_000;
 async function runAsanaSyncOnce(): Promise<void> {
   if (!isAsanaConfigured()) return;
   try {
-    const tickets = await dbListAllAsanaTickets();
-    if (tickets.length === 0) return;
-    const statuses = await fetchProjectTaskStatuses();
-    const nowIso = new Date().toISOString();
-    // Only enqueue rows whose open/closed state actually flipped (or that
-    // vanished from Asana). Rewriting all 1000+ rows every load is what
-    // saturated the pool and stalled the sync — see dbBatchUpdateAsanaStatus.
-    const updates: Array<{ id: string; completedAt?: string | null; deletedAt?: string | null }> = [];
-    for (const t of tickets) {
-      const s = statuses.get(t.asana_task_gid);
-      if (!s) {
-        updates.push({ id: t.id, deletedAt: nowIso });
-        continue;
-      }
-      const wantClosed = s.completed;
-      const isClosed = t.completedAt != null;
-      if (wantClosed !== isClosed) {
-        updates.push({ id: t.id, completedAt: wantClosed ? s.completed_at ?? nowIso : null });
-      }
-    }
-    if (updates.length > 0) await dbBatchUpdateAsanaStatus(updates);
+    await reconcileAsanaStatuses();
   } catch (e) {
     console.error('[dashboard] inline asana sync failed', e);
   }

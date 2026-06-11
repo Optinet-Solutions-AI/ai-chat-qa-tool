@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
-import {
-  dbListAllAsanaTickets,
-  dbBatchUpdateAsanaStatus,
-} from '@/lib/db';
-import { fetchProjectTaskStatuses, isAsanaConfigured } from '@/lib/asana';
+import { isAsanaConfigured } from '@/lib/asana';
+import { reconcileAsanaStatuses } from '@/lib/asana-sync';
 
 // Browser-callable mirror of /api/admin/sync-asana-statuses for the
 // "Refresh status from Asana" button on /dashboard/asana. Has no
@@ -11,7 +8,9 @@ import { fetchProjectTaskStatuses, isAsanaConfigured } from '@/lib/asana';
 // existing /api/dashboard/* pattern); the sync itself is read-from-Asana
 // + idempotent write to one column, so blast radius is bounded.
 //
-// Cron and admin curl paths still go through their secret-protected routes.
+// Shares reconcileAsanaStatuses() with the cron + admin paths so all four
+// stay in step. `synced` is kept as an alias (rows changed this run) for the
+// existing "Synced X/Y tickets" toast on the reporting page.
 
 export const maxDuration = 60;
 
@@ -23,60 +22,13 @@ export async function GET() {
     );
   }
 
-  let tickets: Array<{ id: string; asana_task_gid: string }> = [];
   try {
-    tickets = await dbListAllAsanaTickets();
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-  if (tickets.length === 0) {
-    return NextResponse.json({ synced: 0, total: 0, missing: 0, asana_tasks_seen: 0 });
-  }
-
-  let statuses: Map<string, { completed: boolean; completed_at: string | null }>;
-  try {
-    statuses = await fetchProjectTaskStatuses();
+    const result = await reconcileAsanaStatuses();
+    return NextResponse.json({
+      ...result,
+      synced: result.completed + result.deleted + result.reopened,
+    });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
-
-  const now = new Date().toISOString();
-  const updates: Array<{ id: string; completedAt?: string | null; deletedAt?: string | null }> = [];
-  let missing = 0;
-  let closedInAsana = 0;
-  let asanaTotalCompleted = 0;
-  for (const s of statuses.values()) {
-    if (s.completed) asanaTotalCompleted += 1;
-  }
-  for (const t of tickets) {
-    const s = statuses.get(t.asana_task_gid);
-    if (!s) {
-      // Asana no longer returns this gid — mark deleted so the dashboard
-      // count drops to match the live board. asana_task_gid stays set so
-      // re-analysis won't recreate it.
-      missing += 1;
-      updates.push({ id: t.id, deletedAt: now });
-      continue;
-    }
-    if (s.completed) closedInAsana += 1;
-    updates.push({
-      id: t.id,
-      completedAt: s.completed ? s.completed_at ?? now : null,
-    });
-  }
-
-  try {
-    await dbBatchUpdateAsanaStatus(updates);
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    synced: updates.length,
-    total: tickets.length,
-    missing,
-    asana_tasks_seen: statuses.size,
-    asana_total_completed: asanaTotalCompleted,
-    closed_in_db: closedInAsana,
-  });
 }
