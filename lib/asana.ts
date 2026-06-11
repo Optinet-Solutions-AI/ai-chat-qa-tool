@@ -1090,39 +1090,84 @@ export async function createAsanaTaskForConversation(
     console.warn(`[asana] could not resolve assignee for account manager: ${input.accountManager}`);
   }
 
-  const payload = {
-    data: {
-      name: buildTaskName(input),
-      notes: buildTaskNotes(input),
-      projects: [projectGid],
-      ...(sectionGid
-        ? { memberships: [{ project: projectGid, section: sectionGid }] }
-        : {}),
-      ...(Object.keys(customFields).length > 0 ? { custom_fields: customFields } : {}),
-      ...(assigneeGid ? { assignee: assigneeGid } : {}),
-    },
+  // Three-step creation so the ticket NEVER passes through the board's first
+  // column. Attaching the task to the project on create (via `projects` OR
+  // `memberships`) makes Asana drop it into the default/first column
+  // ("Christian") for a beat before moving it to the right section — and that
+  // transit fires a stray notification to that first-column AM. (Verified:
+  // `memberships`-only is rejected outright; `workspace`+`memberships` still
+  // transits.) Instead:
+  //   1. create the task in the workspace only (not in any project),
+  //   2. add it straight into the AM's section (places directly, no transit),
+  //   3. set the project-local custom fields + assignee now that it's in the
+  //      project — assignee last so the AM is notified once, with the task
+  //      already sitting in their column.
+  const authHeaders = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
   };
 
-  try {
-    const res = await fetch(`${ASANA_API}/tasks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
+  const workspaceGid = await getWorkspaceGid();
+  if (!workspaceGid) {
+    console.error('[asana] could not resolve workspace gid; aborting task creation');
+    return null;
+  }
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error(`[asana] create task failed (${res.status}): ${body.slice(0, 300)}`);
+  try {
+    // 1. Bare task in the workspace — no project yet, so no default column.
+    const createRes = await fetch(`${ASANA_API}/tasks`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        data: { name: buildTaskName(input), notes: buildTaskNotes(input), workspace: workspaceGid },
+      }),
+    });
+    if (!createRes.ok) {
+      const body = await createRes.text().catch(() => '');
+      console.error(`[asana] create task failed (${createRes.status}): ${body.slice(0, 300)}`);
       return null;
     }
+    const gid: string | undefined = (await createRes.json())?.data?.gid;
+    if (!gid) return null;
 
-    const json = await res.json();
-    const gid: string | undefined = json?.data?.gid;
-    return gid ?? null;
+    // 2. Place it directly in the AM's column. addTask adds the task to the
+    //    section's project in one step, with no first-column stop. Fall back to
+    //    a plain project add only when we have no section (rare).
+    if (sectionGid) {
+      const addRes = await fetch(`${ASANA_API}/sections/${sectionGid}/addTask`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ data: { task: gid } }),
+      });
+      if (!addRes.ok) {
+        const body = await addRes.text().catch(() => '');
+        console.error(`[asana] addTask to section failed (${addRes.status}): ${body.slice(0, 200)} — falling back to project add`);
+        await fetch(`${ASANA_API}/tasks/${gid}/addProject`, {
+          method: 'POST', headers: authHeaders, body: JSON.stringify({ data: { project: projectGid } }),
+        }).catch(() => {});
+      }
+    } else {
+      await fetch(`${ASANA_API}/tasks/${gid}/addProject`, {
+        method: 'POST', headers: authHeaders, body: JSON.stringify({ data: { project: projectGid } }),
+      }).catch(() => {});
+    }
+
+    // 3. Set project-local custom fields + assignee now the task is in the project.
+    const updateData: Record<string, unknown> = {};
+    if (Object.keys(customFields).length > 0) updateData.custom_fields = customFields;
+    if (assigneeGid) updateData.assignee = assigneeGid;
+    if (Object.keys(updateData).length > 0) {
+      const upRes = await fetch(`${ASANA_API}/tasks/${gid}`, {
+        method: 'PUT', headers: authHeaders, body: JSON.stringify({ data: updateData }),
+      });
+      if (!upRes.ok) {
+        const body = await upRes.text().catch(() => '');
+        console.error(`[asana] set fields/assignee failed (${upRes.status}): ${body.slice(0, 200)}`);
+      }
+    }
+
+    return gid;
   } catch (e) {
     console.error('[asana] create task exception:', (e as Error).message);
     return null;
