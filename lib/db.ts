@@ -1428,6 +1428,8 @@ export async function dbReconcileConversations(
       .select('id, intercom_id, summary, original_text, analyzed_at')
       .gte('intercom_created_at', startISO)
       .lte('intercom_created_at', endISO)
+      // Stable order required for range pagination — see dbListAllAsanaTickets.
+      .order('id', { ascending: true })
       .range(from, from + CHUNK - 1);
     if (error) throw new Error(`[db] reconcile fetch: ${error.message}`);
     rows.push(...(data ?? []));

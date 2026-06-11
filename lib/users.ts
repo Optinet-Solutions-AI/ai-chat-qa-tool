@@ -12,8 +12,8 @@
 //                /prompts page is hidden + prompt-mutating APIs are blocked).
 //
 // Source of truth: the "AI Tool Users" sheet Val maintains. A few people log
-// in under a username that differs from their display name (Maria's password
-// is TessaTool9; "Raed" → Khoury; "Youseff" → Youssef). To add/remove a person:
+// in under a username that differs from their display name ("Raed" → Khoury;
+// "Youseff" → Youssef). To add/remove a person:
 // add a row here AND add their password to APP_USERS (env), then redeploy.
 
 export type Role = 'admin' | 'standard';
