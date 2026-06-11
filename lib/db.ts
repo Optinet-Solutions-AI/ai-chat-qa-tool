@@ -1149,6 +1149,11 @@ export async function dbListAllAsanaTickets(): Promise<
       .select('id, asana_task_gid, asana_completed_at')
       .not('asana_task_gid', 'is', null)
       .is('asana_task_deleted_at', null)
+      // MUST order for stable range pagination — without it Postgres returns an
+      // arbitrary (and inconsistent) row order per page, so page 2 re-returns
+      // page-1 rows and the real tail is silently dropped. That dropped tail is
+      // exactly where stale-open tickets hide, so the sync never closes them.
+      .order('id', { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`[db] list asana tickets: ${error.message}`);
     const rows = (data ?? []) as Array<{ id: string; asana_task_gid: string | null; asana_completed_at: string | null }>;
@@ -1203,6 +1208,8 @@ export async function dbGetAsanaReportingMetrics(
       .select('id, account_manager, summary, analyzed_at, asana_completed_at')
       .not('asana_task_gid', 'is', null)
       .is('asana_task_deleted_at', null)
+      // Stable order required for range pagination — see dbListAllAsanaTickets.
+      .order('id', { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`[db] asana reporting: ${error.message}`);
     const page = (data ?? []) as Row[];
