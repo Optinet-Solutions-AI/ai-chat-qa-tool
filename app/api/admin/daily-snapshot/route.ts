@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { buildSnapshot, renderSnapshotHTML, renderSnapshotSubject } from '@/lib/dailySnapshot';
 import { sendEmail, parseRecipients } from '@/lib/email';
-import { getSnapshotRecipients } from '@/lib/users';
+import { getSnapshotRecipients } from '@/lib/usersDb';
 
 // Manual trigger for the QA Daily Snapshot email. Same pipeline as the cron
 // at /api/cron/daily-snapshot, plus three QA conveniences:
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       ? parseRecipients(toOverride)
       : envRecipients.length > 0
         ? envRecipients
-        : getSnapshotRecipients();
+        : await getSnapshotRecipients();
     if (recipients.length === 0) {
       return NextResponse.json(
         { error: 'No recipients (roster empty; set DAILY_SNAPSHOT_RECIPIENTS or pass ?to=…)' },

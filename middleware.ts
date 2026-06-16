@@ -36,12 +36,16 @@ export async function middleware(req: NextRequest) {
   const session = await verifyToken(secret, token);
 
   if (session) {
-    // Prompt Library is admin-only ("can change the prompt"). Standard users
-    // who navigate to it directly are bounced to the home page. The matching
-    // prompt-mutating API is gated server-side in app/api/db (the real guard).
+    // Prompt Library and the admin area (user management) are admin-only.
+    // Standard users who navigate there directly are bounced to the home page.
+    // The matching mutating APIs are gated server-side (app/api/db,
+    // app/api/admin/users) — the real guard; this is just the UX redirect.
     if (
       session.role !== 'admin' &&
-      (pathname === '/prompts' || pathname.startsWith('/prompts/'))
+      (pathname === '/prompts' ||
+        pathname.startsWith('/prompts/') ||
+        pathname === '/admin' ||
+        pathname.startsWith('/admin/'))
     ) {
       const url = req.nextUrl.clone();
       url.pathname = '/';

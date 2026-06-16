@@ -1,34 +1,13 @@
 import { NextResponse } from 'next/server';
 import { AUTH_COOKIE, SESSION_TTL_MS, signToken } from '@/lib/auth';
-import { findUser } from '@/lib/users';
+import { dbFindAuthUser } from '@/lib/usersDb';
+import { verifyPassword } from '@/lib/password';
 
 export const runtime = 'nodejs';
 
-// Constant-time string compare to keep timing identical whether the password
-// is right, wrong, or differs in length.
-function timingSafeEqual(a: string, b: string): boolean {
-  const len = Math.max(a.length, b.length);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < len; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
-}
-
-// Passwords live in the APP_USERS env var as JSON { username: password }.
-// Roles/emails come from the committed roster in lib/users.ts.
-function parseAppUsers(raw: string | undefined): Record<string, string> {
-  if (!raw) return {};
-  try {
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === 'object' ? (obj as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
-
 export async function POST(req: Request) {
   const secret = process.env.AUTH_SECRET;
-  const passwords = parseAppUsers(process.env.APP_USERS);
-  if (!secret || Object.keys(passwords).length === 0) {
+  if (!secret) {
     return NextResponse.json({ error: 'Auth not configured' }, { status: 500 });
   }
 
@@ -42,14 +21,27 @@ export async function POST(req: Request) {
   const providedUser = typeof body.username === 'string' ? body.username.trim() : '';
   const providedPass = typeof body.password === 'string' ? body.password : '';
 
-  // Resolve the canonical roster entry (case-insensitive username). When the
-  // user is unknown we still run a constant-time compare against a dummy so
-  // response timing doesn't reveal whether the username exists.
-  const user = findUser(providedUser);
-  const expectedPass = user ? passwords[user.username] : undefined;
-  const passOk = timingSafeEqual(providedPass, expectedPass ?? '\0invalid');
-  if (!user || !expectedPass || !passOk) {
+  // Look up the account (case-insensitive) and verify the password against the
+  // stored scrypt hash. verifyPassword is constant-time and returns false for a
+  // missing/malformed hash, so an unknown user and a wrong password look the
+  // same to the caller.
+  const user = await dbFindAuthUser(providedUser);
+  const passOk = verifyPassword(providedPass, user?.passwordHash);
+  if (!user || !passOk) {
     return NextResponse.json({ error: 'Wrong username or password' }, { status: 401 });
+  }
+
+  // Only approved accounts may sign in. Pending/rejected/disabled get a clear,
+  // distinct message (code 403) so the login page can explain the hold-up
+  // without the user wondering if they fat-fingered the password.
+  if (user.status !== 'approved') {
+    const reason =
+      user.status === 'pending'
+        ? 'Your account is awaiting admin approval.'
+        : user.status === 'rejected'
+          ? 'Your account request was declined. Contact an admin.'
+          : 'Your account has been disabled. Contact an admin.';
+    return NextResponse.json({ error: reason, status: user.status }, { status: 403 });
   }
 
   const expiry = Date.now() + SESSION_TTL_MS;

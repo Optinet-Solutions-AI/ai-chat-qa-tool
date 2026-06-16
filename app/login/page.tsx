@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Orbitron } from 'next/font/google';
+import { TEAMS } from '@/lib/users';
 
 // Self-hosted at build time by next/font — no runtime network call.
 const orbitron = Orbitron({ subsets: ['latin'], weight: ['500', '700'] });
@@ -34,16 +35,57 @@ function LoginForm() {
   // surprise authenticated users.
   const [isDark, setIsDark] = useState(false);
 
+  // 'login' is the default; 'register' is the self-service sign-up form. New
+  // accounts land in a 'pending' state an admin must approve, so registering
+  // shows a confirmation rather than logging the user straight in.
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [team, setTeam] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function switchMode(next: 'login' | 'register') {
+    setMode(next);
+    setError(null);
+    setNotice(null);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    setNotice(null);
+
+    if (mode === 'register') {
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, password, team }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data?.error || 'Could not create account.');
+          setSubmitting(false);
+          return;
+        }
+        // Success: drop back to the login form with a pending-approval notice.
+        setMode('login');
+        setPassword('');
+        setNotice('Account created. An admin must approve it before you can sign in.');
+        setSubmitting(false);
+      } catch {
+        setError('Network error.');
+        setSubmitting(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -51,7 +93,14 @@ function LoginForm() {
         body: JSON.stringify({ username, password }),
       });
       if (!res.ok) {
-        setError(res.status === 401 ? 'Wrong username or password.' : 'Login failed.');
+        // 403 carries a specific reason (pending/rejected/disabled); 401 is a
+        // plain credential failure.
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          setError(data?.error || 'Your account is not active.');
+        } else {
+          setError(res.status === 401 ? 'Wrong username or password.' : 'Login failed.');
+        }
         setSubmitting(false);
         return;
       }
@@ -61,6 +110,11 @@ function LoginForm() {
       setSubmitting(false);
     }
   }
+
+  const isRegister = mode === 'register';
+  const canSubmit = isRegister
+    ? !!username && !!password && !!email && !!team
+    : !!username && !!password;
 
   return (
     <div className={isDark ? 'dark' : ''}>
@@ -112,7 +166,7 @@ function LoginForm() {
               <h1
                 className={`${orbitron.className} text-2xl md:text-3xl tracking-wider mb-8 text-slate-900 dark:text-white`}
               >
-                Welcome Back
+                {isRegister ? 'Create Account' : 'Welcome Back'}
               </h1>
 
               <div className="space-y-3">
@@ -130,11 +184,26 @@ function LoginForm() {
                     dark:bg-white/[0.06] dark:border-white/10 dark:text-white dark:placeholder:text-slate-400
                     dark:focus:border-cyan-400/60 dark:focus:bg-white/[0.09] dark:focus:ring-cyan-400/20"
                 />
+                {isRegister && (
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="Email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-lg px-4 py-3 text-sm transition focus:outline-none focus:ring-2
+                      bg-white border border-slate-200 text-slate-900 placeholder:text-slate-400
+                      focus:border-sky-400 focus:ring-sky-400/20
+                      dark:bg-white/[0.06] dark:border-white/10 dark:text-white dark:placeholder:text-slate-400
+                      dark:focus:border-cyan-400/60 dark:focus:bg-white/[0.09] dark:focus:ring-cyan-400/20"
+                  />
+                )}
                 <input
                   id="pw"
                   type="password"
                   placeholder="Password"
-                  autoComplete="current-password"
+                  autoComplete={isRegister ? 'new-password' : 'current-password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full rounded-lg px-4 py-3 text-sm transition focus:outline-none focus:ring-2
@@ -143,19 +212,75 @@ function LoginForm() {
                     dark:bg-white/[0.06] dark:border-white/10 dark:text-white dark:placeholder:text-slate-400
                     dark:focus:border-cyan-400/60 dark:focus:bg-white/[0.09] dark:focus:ring-cyan-400/20"
                 />
+                {isRegister && (
+                  <select
+                    id="team"
+                    value={team}
+                    onChange={(e) => setTeam(e.target.value)}
+                    className="w-full rounded-lg px-4 py-3 text-sm transition focus:outline-none focus:ring-2
+                      bg-white border border-slate-200 text-slate-900
+                      focus:border-sky-400 focus:ring-sky-400/20
+                      dark:bg-white/[0.06] dark:border-white/10 dark:text-white
+                      dark:focus:border-cyan-400/60 dark:focus:bg-white/[0.09] dark:focus:ring-cyan-400/20"
+                  >
+                    <option value="" disabled>
+                      Select your team…
+                    </option>
+                    {TEAMS.map((t) => (
+                      <option key={t} value={t} className="text-slate-900">
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {error && (
                 <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{error}</p>
               )}
+              {notice && (
+                <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-300">{notice}</p>
+              )}
 
               <button
                 type="submit"
-                disabled={submitting || !username || !password}
+                disabled={submitting || !canSubmit}
                 className={`${orbitron.className} mt-5 w-full py-3 rounded-lg font-bold tracking-widest text-slate-900 bg-gradient-to-r from-cyan-400 via-sky-400 to-fuchsia-400 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-sky-400/20 dark:shadow-fuchsia-500/20 transition`}
               >
-                {submitting ? 'SIGNING IN…' : 'LOGIN'}
+                {submitting
+                  ? isRegister
+                    ? 'CREATING…'
+                    : 'SIGNING IN…'
+                  : isRegister
+                    ? 'CREATE ACCOUNT'
+                    : 'LOGIN'}
               </button>
+
+              <p className="mt-5 text-sm text-center text-slate-500 dark:text-slate-400">
+                {isRegister ? (
+                  <>
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('login')}
+                      className="font-semibold text-sky-600 hover:text-sky-500 dark:text-cyan-300 dark:hover:text-cyan-200"
+                    >
+                      Sign in
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Need an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('register')}
+                      className="font-semibold text-sky-600 hover:text-sky-500 dark:text-cyan-300 dark:hover:text-cyan-200"
+                    >
+                      Create one
+                    </button>
+                  </>
+                )}
+              </p>
             </form>
 
             {/* Right: brand panel */}
