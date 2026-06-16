@@ -81,6 +81,20 @@ export async function dbUsernameExists(username: string): Promise<boolean> {
   return !!data;
 }
 
+// Lowercased set of every taken username, fetched in a single query. For
+// bulk paths (the seed import) that would otherwise do one round trip per
+// candidate.
+export async function dbExistingUsernamesLower(): Promise<Set<string>> {
+  const { data, error } = await supabase.from(TABLE).select('username');
+  if (error) {
+    console.error('[usersDb] existingUsernames:', error.message);
+    // Fail safe: pretend everything exists so a bulk import skips rather than
+    // risks duplicates on a transient error.
+    throw new Error(`[usersDb] existingUsernames: ${error.message}`);
+  }
+  return new Set((data ?? []).map((r) => r.username.toLowerCase()));
+}
+
 export interface NewUser {
   username: string;
   email: string;
@@ -128,62 +142,49 @@ export async function dbListUsers(): Promise<AppUser[]> {
   return (data ?? []).map(mapUser);
 }
 
+// Shared row patcher for the single-user admin mutations below — stamps
+// updated_at and throws a labelled error so each caller stays a one-liner.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function patchUser(id: string, patch: Record<string, any>, label: string): Promise<void> {
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(`[usersDb] ${label}: ${error.message}`);
+}
+
 // Approve a pending user, assigning the team (which also fixes the derived
 // role). Records who approved and when.
-export async function dbApproveUser(
+export function dbApproveUser(
   id: string,
   team: string,
   role: Role,
   snapshot: boolean,
   approvedBy: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({
-      status: 'approved',
-      team,
-      role,
-      snapshot,
-      approved_at: new Date().toISOString(),
-      approved_by: approvedBy,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-  if (error) throw new Error(`[usersDb] approveUser: ${error.message}`);
+  return patchUser(
+    id,
+    { status: 'approved', team, role, snapshot, approved_at: new Date().toISOString(), approved_by: approvedBy },
+    'approveUser',
+  );
 }
 
-export async function dbSetUserStatus(id: string, status: UserStatus): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw new Error(`[usersDb] setUserStatus: ${error.message}`);
+export function dbSetUserStatus(id: string, status: UserStatus): Promise<void> {
+  return patchUser(id, { status }, 'setUserStatus');
 }
 
 // Change an approved user's team — re-derives and stores the role too.
-export async function dbUpdateUserTeam(id: string, team: string, role: Role): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({ team, role, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw new Error(`[usersDb] updateUserTeam: ${error.message}`);
+export function dbUpdateUserTeam(id: string, team: string, role: Role): Promise<void> {
+  return patchUser(id, { team, role }, 'updateUserTeam');
 }
 
-export async function dbSetUserSnapshot(id: string, snapshot: boolean): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({ snapshot, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw new Error(`[usersDb] setUserSnapshot: ${error.message}`);
+export function dbSetUserSnapshot(id: string, snapshot: boolean): Promise<void> {
+  return patchUser(id, { snapshot }, 'setUserSnapshot');
 }
 
 // Admin-initiated password reset: store a freshly hashed password.
-export async function dbSetUserPassword(id: string, passwordHash: string): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw new Error(`[usersDb] setUserPassword: ${error.message}`);
+export function dbSetUserPassword(id: string, passwordHash: string): Promise<void> {
+  return patchUser(id, { password_hash: passwordHash }, 'setUserPassword');
 }
 
 export async function dbDeleteUser(id: string): Promise<void> {

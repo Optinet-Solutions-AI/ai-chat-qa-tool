@@ -85,3 +85,28 @@ export async function verifyToken(secret: string, token: string | undefined): Pr
   }
   return { username, role, expiryMs };
 }
+
+// Parse a single cookie value out of a raw Cookie header. Route handlers that
+// receive a plain Request (not NextRequest) have no req.cookies helper, so they
+// use this. Pure string work — edge-safe.
+export function parseCookie(header: string | null, name: string): string | undefined {
+  if (!header) return undefined;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    }
+  }
+  return undefined;
+}
+
+// Verify the auth cookie carried on a plain Request and return the decoded
+// session (or null if missing/invalid/misconfigured). The single entry point
+// for API route handlers that need the caller's identity.
+export async function getSessionFromRequest(req: Request): Promise<Session | null> {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return null;
+  const token = parseCookie(req.headers.get('cookie'), AUTH_COOKIE);
+  return verifyToken(secret, token);
+}

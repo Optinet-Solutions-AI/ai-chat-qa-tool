@@ -15,7 +15,7 @@ import {
   loadFromSupabase,
 } from '@/lib/db';
 import type { Conversation, ConversationNote, PromptVersion, AnalysisRun } from '@/lib/types';
-import { AUTH_COOKIE, verifyToken } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 
 // Prompt edits ("change the prompt") are admin-only. These actions are the
 // real security boundary — hiding the Prompt Library nav for standard users is
@@ -26,20 +26,6 @@ const ADMIN_ONLY_ACTIONS = new Set([
   'deletePrompt',
   'activatePrompt',
 ]);
-
-// Minimal Cookie-header parser — this route receives a plain Request (not
-// NextRequest), so there's no req.cookies helper to lean on.
-function readCookie(header: string | null, name: string): string | undefined {
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
-    }
-  }
-  return undefined;
-}
 
 export async function GET() {
   const data = await loadFromSupabase();
@@ -59,9 +45,7 @@ export async function POST(req: Request) {
   const { action, payload } = body;
 
   if (ADMIN_ONLY_ACTIONS.has(action)) {
-    const secret = process.env.AUTH_SECRET;
-    const token = readCookie(req.headers.get('cookie'), AUTH_COOKIE);
-    const session = secret ? await verifyToken(secret, token) : null;
+    const session = await getSessionFromRequest(req);
     if (!session || session.role !== 'admin') {
       return NextResponse.json(
         { error: 'Forbidden: editing prompts requires an admin account' },

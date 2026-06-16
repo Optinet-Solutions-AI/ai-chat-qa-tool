@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { dbCreateUser, dbUsernameExists } from '@/lib/usersDb';
+import { dbCreateUser, dbExistingUsernamesLower } from '@/lib/usersDb';
 import { hashPassword } from '@/lib/password';
 import { roleForTeam, defaultSnapshotForTeam, type Team } from '@/lib/users';
 
@@ -83,8 +83,11 @@ export async function POST(req: NextRequest) {
   const skipped: string[] = [];
   const missingPassword: string[] = [];
 
+  // One query for all taken usernames, rather than a round trip per candidate.
+  const existing = await dbExistingUsernamesLower();
+
   for (const u of LEGACY) {
-    if (await dbUsernameExists(u.username)) {
+    if (existing.has(u.username.toLowerCase())) {
       skipped.push(u.username);
       continue;
     }

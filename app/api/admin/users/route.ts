@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
-import { AUTH_COOKIE, verifyToken } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 import {
   dbListUsers,
   dbApproveUser,
@@ -15,28 +15,11 @@ import { isTeam, roleForTeam, defaultSnapshotForTeam } from '@/lib/users';
 
 export const runtime = 'nodejs';
 
-// Minimal Cookie-header parser — this route receives a plain Request (not
-// NextRequest), so there's no req.cookies helper. (Mirrors app/api/db.)
-function readCookie(header: string | null, name: string): string | undefined {
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
-    }
-  }
-  return undefined;
-}
-
 // All user-management actions require an admin session. The middleware already
 // requires *a* valid session for /api/*, but the admin role is the real
 // boundary, so re-check it here on the server.
 async function requireAdmin(req: Request): Promise<{ username: string } | null> {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return null;
-  const token = readCookie(req.headers.get('cookie'), AUTH_COOKIE);
-  const session = await verifyToken(secret, token);
+  const session = await getSessionFromRequest(req);
   if (!session || session.role !== 'admin') return null;
   return { username: session.username };
 }
