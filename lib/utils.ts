@@ -261,11 +261,24 @@ export function cleanPlayerName(name: string | null): string | null {
   return s.trim() || null;
 }
 
+// Nova Dreams migrated backoffices in 2026-06 (novadreams.casino-backend.com ->
+// backoffice.novadreams-matu.com). The new system RENUMBERED every player, so a
+// link migration is a per-player URL remap, not a domain swap — keeping the old
+// ID would point at the wrong account. The backlink value is sourced verbatim
+// from Intercom, so until those attributes are updated upstream we remap known
+// players here by their full old URL. Add one entry per confirmed old->new pair.
+const BACKLINK_REWRITES: Record<string, string> = {
+  'https://novadreams.casino-backend.com/backend/players/23485':
+    'https://backoffice.novadreams-matu.com/backend/players/53950',
+};
+
 export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attributes'>): string | null {
-  return getCustomAttr(
+  const raw = getCustomAttr(
     conv.player_custom_attributes,
     'backlinkfull', 'backlink_full', 'backlinkFull', 'BacklinkFull', 'backlink',
   );
+  if (!raw) return null;
+  return BACKLINK_REWRITES[raw] ?? raw;
 }
 
 // ── AI summary helpers ───────────────────────────────────────────────────────
