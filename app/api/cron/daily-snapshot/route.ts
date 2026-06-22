@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { buildSnapshot, renderSnapshotHTML, renderSnapshotSubject } from '@/lib/dailySnapshot';
-import { sendEmail, parseRecipients } from '@/lib/email';
+import { sendEmail } from '@/lib/email';
 import { getSnapshotRecipients } from '@/lib/usersDb';
 
 // Vercel cron tick — sends the QA Daily Snapshot email to the recipient list.
@@ -25,14 +25,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Recipients come from the roster (lib/users.ts — the "Daily Snapshot
-  // Notification" column). DAILY_SNAPSHOT_RECIPIENTS, if set, overrides the
-  // roster for one-off testing.
-  const envRecipients = parseRecipients(process.env.DAILY_SNAPSHOT_RECIPIENTS);
-  const recipients = envRecipients.length > 0 ? envRecipients : await getSnapshotRecipients();
+  // Recipients are exactly the people with the "Daily Snapshot" box checked in
+  // the Users admin (app_users.snapshot = true, status approved). The checkbox
+  // is the single source of truth — nothing shadows it.
+  const recipients = await getSnapshotRecipients();
   if (recipients.length === 0) {
     return NextResponse.json(
-      { error: 'No snapshot recipients configured (roster + DAILY_SNAPSHOT_RECIPIENTS both empty)' },
+      { error: 'No snapshot recipients (nobody has the Daily Snapshot box checked)' },
       { status: 500 },
     );
   }

@@ -49,17 +49,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Precedence: ?to= one-off override → DAILY_SNAPSHOT_RECIPIENTS env →
-    // the roster's flagged recipients (lib/users.ts).
-    const envRecipients = parseRecipients(process.env.DAILY_SNAPSHOT_RECIPIENTS);
-    const recipients = toOverride
-      ? parseRecipients(toOverride)
-      : envRecipients.length > 0
-        ? envRecipients
-        : await getSnapshotRecipients();
+    // Precedence: ?to= one-off test override → the "Daily Snapshot" checkboxes
+    // (app_users.snapshot). The checkbox is the source of truth; ?to= only
+    // exists to send a test to yourself without emailing the whole list.
+    const recipients = toOverride ? parseRecipients(toOverride) : await getSnapshotRecipients();
     if (recipients.length === 0) {
       return NextResponse.json(
-        { error: 'No recipients (roster empty; set DAILY_SNAPSHOT_RECIPIENTS or pass ?to=…)' },
+        { error: 'No recipients (nobody has the Daily Snapshot box checked; or pass ?to=…)' },
         { status: 400 },
       );
     }
