@@ -20,6 +20,10 @@ export async function POST() {
       .from('conversations')
       .select('id, player_tags, player_segments, tags, player_companies')
       .is('account_manager', null)
+      // Stable cursor: unordered .range() pagination over a large table can skip
+      // or duplicate rows between pages (PostgREST gives no ordering guarantee),
+      // so a single backfill pass would silently miss rows. Order by id.
+      .order('id', { ascending: true })
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
