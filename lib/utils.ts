@@ -52,8 +52,14 @@ function getCustomAttr(attrs: Record<string, unknown> | null, ...keys: string[])
 // Maps each normalized Intercom group to its AM display name.
 // VIP and NON-VIP groups for the same base can resolve to different AMs.
 export const GROUP_TO_AM: Record<string, string> = {
+  // Nik's portfolio (Norway). The groups VIP_Ada / NON-VIP_Ada were renamed in
+  // Intercom to VIP_Nik / NON-VIP_Nik. The new names are the live source for
+  // new conversations; the old ada_ keys are kept so already-collected rows
+  // (whose player_tags are frozen at collection time) still resolve to Nik.
   'vip_ada':           'Nik',
   'non-vip_ada':       'Nik',
+  'vip_nik':           'Nik',
+  'non-vip_nik':       'Nik',
   'vip_christian':     'Christian',
   'non-vip_christian': 'Niklas',
   'vip_salvatore':     'Salvatore',
@@ -61,11 +67,11 @@ export const GROUP_TO_AM: Record<string, string> = {
   'vip_esam':          'Esam',
   'non-vip_esam':      'Yassine',
   'vip_koko':          'Koko',
-  'non-vip_koko':      'Geri/Nik',
+  'non-vip_koko':      'Geri/Martin/Allan',
   'softswiss':         'SoftSwiss',
 };
 
-export const AM_NAMES = ['Nik', 'Christian', 'Niklas', 'Salvatore', 'Stefano', 'Esam', 'Yassine', 'Koko', 'Geri/Nik', 'SoftSwiss'] as const;
+export const AM_NAMES = ['Nik', 'Christian', 'Niklas', 'Salvatore', 'Stefano', 'Esam', 'Yassine', 'Koko', 'Geri/Martin/Allan', 'SoftSwiss'] as const;
 export type AmName = typeof AM_NAMES[number];
 
 // ── VIP Level group mapping ──────────────────────────────────────────────────

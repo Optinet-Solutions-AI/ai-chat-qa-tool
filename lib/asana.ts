@@ -44,7 +44,7 @@
 //                                e.g. {"Ada":"1199...","Christian":"1199..."}.
 //                                Used as an explicit override — wins over
 //                                workspace auto-discovery. Useful for joint
-//                                AMs ("Geri/Nik") and display-name mismatches.
+//                                AMs ("Geri/Martin/Allan") and display-name mismatches.
 //                                Unmapped AMs fall through to the workspace
 //                                user lookup below.
 //   ASANA_WORKSPACE_GID          Optional. The workspace whose user list is
@@ -117,7 +117,7 @@ const enumOptionCreatesInFlight = new Map<string, Promise<string | null>>();
 // Workspace-level user discovery for assignee routing. Lets us look up an AM
 // by name in the Asana workspace instead of requiring every AM be present in
 // ASANA_AM_USER_MAP. The env-var map still wins when set — useful for edge
-// cases (display name ≠ Asana user name, joint AMs like "Geri/Nik").
+// cases (display name ≠ Asana user name, joint AMs like "Geri/Martin/Allan").
 const WORKSPACE_TTL_MS = 60 * 60 * 1000;
 let workspaceGidCache: { fetchedAt: number; gid: string | null } | null = null;
 const WORKSPACE_USERS_TTL_MS = 30 * 60 * 1000;
@@ -257,7 +257,7 @@ async function getWorkspaceUsersByName(): Promise<Map<string, string>> {
 //   1. ASANA_AM_USER_MAP env override (explicit, highest priority).
 //   2. Exact name match in the workspace user list.
 //   3. First-token match: AM "Christian" matches user "Christian Surname";
-//      AM "Geri/Nik" tries "Geri", then "Nik". This catches the common case
+//      AM "Geri/Martin/Allan" tries "Geri", "Martin", "Allan". Catches the common case
 //      where the AM display name is just a first name but the Asana user
 //      record has the full name.
 // Returns null when nothing matches — the ticket is created unassigned
@@ -275,7 +275,7 @@ async function resolveAssigneeForAm(amName: string | null): Promise<string | nul
   const exact = users.get(normalized);
   if (exact) return exact;
 
-  // AM display name might be a first name only or a joint AM like "Geri/Nik".
+  // AM display name might be a first name only or a joint AM like "Geri/Martin/Allan".
   // Split on whitespace + slash and try each token against user first names.
   const tokens = normalized.split(/[\s/]+/).filter(Boolean);
   for (const token of tokens) {
@@ -1077,7 +1077,7 @@ export async function createAsanaTaskForConversation(
   }
 
   // Assignee: ASANA_AM_USER_MAP wins when set (explicit override for joint
-  // AMs like "Geri/Nik" or display-name mismatches), otherwise we look the
+  // AMs like "Geri/Martin/Allan" or display-name mismatches), otherwise we look the
   // AM up by name in the workspace user list. Unresolvable AMs leave the
   // ticket unassigned and log a warning — creation still succeeds.
   // ASANA_DISABLE_AM_ASSIGNEE=true skips assignee entirely so AMs don't get

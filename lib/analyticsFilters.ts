@@ -332,7 +332,7 @@ export function applyConversationDbFilters(q: AnySupabaseQuery, f: DbFilterInput
   if (ams.length > 0) {
     // Map each AM display name → owned groups via GROUP_TO_AM so VIP/NON-VIP
     // halves that resolve to different AMs (e.g. vip_koko=Koko,
-    // non-vip_koko=Geri/Nik) don't bleed into each other's results. Multiple
+    // non-vip_koko=Geri/Martin/Allan) don't bleed into each other's results. Multiple
     // AMs are unioned together — a row matching any selected AM passes.
     const allTags = new Set<string>();
     for (const am of ams) {
@@ -343,7 +343,7 @@ export function applyConversationDbFilters(q: AnySupabaseQuery, f: DbFilterInput
     }
     // The AM block has to stay on .or() since it combines two columns
     // (account_manager OR player_tags-overlap) into one disjunction. Quote
-    // each AM name individually to handle "Geri/Nik" and any name with a
+    // each AM name individually to handle "Geri/Martin/Allan" and any name with a
     // slash, comma or space.
     const quotedTags  = [...allTags].map((t) => `"${t}"`).join(',');
     const amInList    = `account_manager.in.(${ams.map(pgrstQuote).join(',')})`;
