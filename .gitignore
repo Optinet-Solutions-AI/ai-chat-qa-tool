@@ -8,3 +8,6 @@ package-lock.json
 out/
 .claude/
 .vercel
+.vscode/
+tmp/
+*.tsbuildinfo
