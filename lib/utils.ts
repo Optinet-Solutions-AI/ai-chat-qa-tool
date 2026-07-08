@@ -52,14 +52,15 @@ function getCustomAttr(attrs: Record<string, unknown> | null, ...keys: string[])
 // Maps each normalized Intercom group to its AM display name.
 // VIP and NON-VIP groups for the same base can resolve to different AMs.
 export const GROUP_TO_AM: Record<string, string> = {
-  // Nik's portfolio (Norway). The groups VIP_Ada / NON-VIP_Ada were renamed in
-  // Intercom to VIP_Nik / NON-VIP_Nik. The new names are the live source for
-  // new conversations; the old ada_ keys are kept so already-collected rows
-  // (whose player_tags are frozen at collection time) still resolve to Nik.
+  // Nik's Norway portfolio. The groups VIP_Ada / NON-VIP_Ada were renamed in
+  // Intercom to VIP_Nik / NON-VIP_Nik. VIP stays with Nik; the NON-VIP side is
+  // now handled by the Geri/Martin/Allan team. The old ada_ keys are kept so
+  // already-collected rows (player_tags frozen at collection time) still resolve
+  // to the same targets as their renamed nik_ counterparts.
   'vip_ada':           'Nik',
-  'non-vip_ada':       'Nik',
+  'non-vip_ada':       'Geri/Martin/Allan',
   'vip_nik':           'Nik',
-  'non-vip_nik':       'Nik',
+  'non-vip_nik':       'Geri/Martin/Allan',
   'vip_christian':     'Christian',
   'non-vip_christian': 'Niklas',
   'vip_salvatore':     'Salvatore',
@@ -267,16 +268,19 @@ export function cleanPlayerName(name: string | null): string | null {
   return s.trim() || null;
 }
 
-// Nova Dreams migrated backoffices in 2026-06 (novadreams.casino-backend.com ->
-// backoffice.novadreams-matu.com). The new system RENUMBERED every player, so a
-// link migration is a per-player URL remap, not a domain swap — keeping the old
-// ID would point at the wrong account. The backlink value is sourced verbatim
-// from Intercom, so until those attributes are updated upstream we remap known
-// players here by their full old URL. Add one entry per confirmed old->new pair.
-const BACKLINK_REWRITES: Record<string, string> = {
-  'https://novadreams.casino-backend.com/backend/players/23485':
-    'https://backoffice.novadreams-matu.com/backend/players/53950',
-};
+// Nova Dreams migrated its backoffice DOMAIN in 2026-06:
+// novadreams.casino-backend.com -> backoffice.novadreams-matu.com. The player ID
+// is PRESERVED across the migration (Val-confirmed 2026-07-08: old
+// .../players/23485 == new .../players/23485). An earlier belief that the new
+// system renumbered players — and the resulting hardcoded 23485->53950 rewrite —
+// was WRONG: 53950 is a different account (David Gabulya, non-VIP). So the
+// correct fix is a pure host swap with the path/ID untouched, which repairs
+// every Nova Dreams player whose Intercom backlink still carries the old domain.
+// URLs already on the new domain don't match and pass through unchanged. The
+// long-term fix is still to update the backlink attributes in Intercom upstream.
+const BACKLINK_HOST_REWRITES: Array<[RegExp, string]> = [
+  [/^https:\/\/novadreams\.casino-backend\.com(\/|$)/i, 'https://backoffice.novadreams-matu.com$1'],
+];
 
 export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attributes'>): string | null {
   const raw = getCustomAttr(
@@ -284,7 +288,10 @@ export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attribut
     'backlinkfull', 'backlink_full', 'backlinkFull', 'BacklinkFull', 'backlink',
   );
   if (!raw) return null;
-  return BACKLINK_REWRITES[raw] ?? raw;
+  for (const [pattern, replacement] of BACKLINK_HOST_REWRITES) {
+    if (pattern.test(raw)) return raw.replace(pattern, replacement);
+  }
+  return raw;
 }
 
 // ── AI summary helpers ───────────────────────────────────────────────────────
