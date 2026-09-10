@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { buildPendingSnapshot, sendTelegramMessage } from '@/lib/telegram-snapshot';
+import { pingHeartbeat } from '@/lib/heartbeat';
 
 // Vercel cron tick — posts a "Pending Action Cases Snapshot" to the Telegram
 // chat configured via TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID. Schedule lives in
@@ -18,15 +19,21 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Heartbeat pings live inside the try/catch only — an Unauthorized probe is
+  // not a pipeline failure and must not raise an alert.
   try {
     const { total, byAm, message } = await buildPendingSnapshot();
     await sendTelegramMessage(message);
+    // Only after the message is actually delivered, so the monitor tracks
+    // snapshots reaching the group rather than the route merely being invoked.
+    await pingHeartbeat('success');
     return NextResponse.json({
       ok: true,
       total,
       byAm: Object.fromEntries(byAm),
     });
   } catch (e) {
+    await pingHeartbeat('fail');
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }
