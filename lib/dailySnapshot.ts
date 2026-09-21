@@ -1,6 +1,7 @@
 // Daily QA Snapshot — aggregation + HTML rendering for the morning email
-// digest. Cron at /api/cron/daily-snapshot fires this once a day at 07:00 UTC
-// covering the prior full UTC day; admin trigger at /api/admin/daily-snapshot
+// digest. Cron at /api/cron/daily-snapshot fired this once a day at 07:00 UTC
+// covering the prior full UTC day, and is paused as of 2026-09-21 (see that
+// route's header); admin trigger at /api/admin/daily-snapshot
 // supports ?dry=1 (HTML preview), ?date=YYYY-MM-DD (override target day) and
 // ?to=<addr> (override recipient list for solo test sends).
 //

@@ -5,7 +5,11 @@ import { sendEmail } from '@/lib/email';
 import { getSnapshotRecipients } from '@/lib/usersDb';
 
 // Vercel cron tick — sends the QA Daily Snapshot email to the recipient list.
-// Schedule lives in vercel.json (07:00 UTC daily). Manual equivalent (with
+//
+// PAUSED 2026-09-21: the "0 7 * * *" entry was removed from vercel.json because
+// the 3-hourly Telegram snapshot already covers the same ground. The route and
+// the recipient list (app_users.snapshot) are untouched — to resume, put the
+// entry back in vercel.json and redeploy. Manual equivalent (with
 // browser-friendly ?secret= auth, ?dry=1 preview, ?date= override and ?to=
 // recipient override) is /api/admin/daily-snapshot.
 //
