@@ -106,7 +106,9 @@ export default function AdminUsersPage() {
             <code className="rounded bg-white px-2 py-1 font-mono text-sky-700 dark:bg-slate-900 dark:text-cyan-300">
               {resetInfo.password}
             </code>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Share it with them securely.</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Share it with them securely. They will be asked to choose their own password when they next open the app.
+            </span>
             <button
               onClick={() => setResetInfo(null)}
               className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white"
@@ -202,7 +204,17 @@ export default function AdminUsersPage() {
                     {others.map((u) => (
                       <tr key={u.id} className="text-slate-700 dark:text-slate-200">
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900 dark:text-white">{u.username}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900 dark:text-white">{u.username}</span>
+                            {u.passwordTemporary && (
+                              <span
+                                title="On an admin-issued temporary password; has not chosen their own yet"
+                                className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-400/10 dark:text-amber-300"
+                              >
+                                temp password
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">{u.email}</div>
                         </td>
                         <td className="px-4 py-3">

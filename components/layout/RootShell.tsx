@@ -8,6 +8,7 @@ import AppInitializer from './AppInitializer';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import AddConversationModal from '@/components/conversations/AddConversationModal';
+import FirstLoginPasswordPrompt from './FirstLoginPasswordPrompt';
 
 const COLLAPSE_KEY = 'qa_sidebar_collapsed';
 
@@ -67,6 +68,10 @@ export default function RootShell({ children }: { children: React.ReactNode }) {
         {showAddConv && (
           <AddConversationModal onClose={() => setShowAddConv(false)} />
         )}
+
+        {/* "Welcome — set your own password" prompt for accounts still on an
+            admin-issued temporary password (skippable per browser session). */}
+        <FirstLoginPasswordPrompt />
       </AppInitializer>
     </ToastProvider>
     </ConfirmProvider>

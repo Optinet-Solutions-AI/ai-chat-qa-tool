@@ -34,6 +34,11 @@ export function isTeam(value: unknown): value is Team {
 // Account lifecycle. Only 'approved' accounts may log in.
 export type UserStatus = 'pending' | 'approved' | 'rejected' | 'disabled';
 
+// Minimum password length. Shared by self-registration, the admin reset
+// endpoint and the self-service change-password flow (server validation and
+// the client-side hints), so there is exactly one number to change.
+export const MIN_PASSWORD_LEN = 6;
+
 // Role is derived from team: Management is the admin team, everyone else is
 // standard. Keeping this a single function means there's exactly one place that
 // decides who can edit the Prompt Library.
@@ -59,6 +64,12 @@ export interface AppUser {
   status: UserStatus;
   /** Receives the morning Daily Snapshot email. */
   snapshot: boolean;
+  /**
+   * True while the account is on an admin-issued temporary password (the user
+   * has not chosen their own yet). Derived server-side from the hash scheme —
+   * see lib/password.ts.
+   */
+  passwordTemporary: boolean;
   createdAt: string;
   approvedAt: string | null;
   approvedBy: string | null;

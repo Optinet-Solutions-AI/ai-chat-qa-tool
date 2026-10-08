@@ -47,7 +47,9 @@ export async function POST(req: Request) {
   const expiry = Date.now() + SESSION_TTL_MS;
   const token = await signToken(secret, { username: user.username, role: user.role, expiryMs: expiry });
 
-  const res = NextResponse.json({ ok: true });
+  // mustChangePassword tells the caller a temporary password was used. The
+  // in-app welcome prompt itself is driven by /api/auth/me on load.
+  const res = NextResponse.json({ ok: true, mustChangePassword: user.mustChangePassword });
   res.cookies.set({
     name: AUTH_COOKIE,
     value: token,

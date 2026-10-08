@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import ThemeToggle from './ThemeToggle';
+import ChangePasswordModal from './ChangePasswordModal';
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -33,6 +35,14 @@ function IconLogout() {
   );
 }
 
+function IconKey() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+    </svg>
+  );
+}
+
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Conversations',
   '/prompts': 'Prompt Library',
@@ -42,6 +52,7 @@ export default function Header({ onMenuToggle, onAddConversation }: HeaderProps)
   const router = useRouter();
   const pathname = usePathname();
   const { currentUser } = useStore();
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const title = PAGE_TITLES[pathname] ?? '';
 
@@ -85,6 +96,15 @@ export default function Header({ onMenuToggle, onAddConversation }: HeaderProps)
         <ThemeToggle />
 
         <button
+          onClick={() => setShowChangePassword(true)}
+          title="Change password"
+          aria-label="Change password"
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+        >
+          <IconKey />
+        </button>
+
+        <button
           onClick={handleLogout}
           title="Sign out"
           aria-label="Sign out"
@@ -98,6 +118,10 @@ export default function Header({ onMenuToggle, onAddConversation }: HeaderProps)
           {currentUser ? currentUser.charAt(0) : '?'}
         </div>
       </div>
+
+      {showChangePassword && (
+        <ChangePasswordModal mode="change" onClose={() => setShowChangePassword(false)} />
+      )}
     </header>
   );
 }

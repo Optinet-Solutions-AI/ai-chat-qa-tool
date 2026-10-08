@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { randomBytes } from 'node:crypto';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
   dbListUsers,
@@ -10,8 +9,8 @@ import {
   dbSetUserPassword,
   dbDeleteUser,
 } from '@/lib/usersDb';
-import { hashPassword } from '@/lib/password';
-import { isTeam, roleForTeam, defaultSnapshotForTeam } from '@/lib/users';
+import { hashPassword, generateTempPassword } from '@/lib/password';
+import { isTeam, roleForTeam, defaultSnapshotForTeam, MIN_PASSWORD_LEN } from '@/lib/users';
 
 export const runtime = 'nodejs';
 
@@ -22,13 +21,6 @@ async function requireAdmin(req: Request): Promise<{ username: string } | null> 
   const session = await getSessionFromRequest(req);
   if (!session || session.role !== 'admin') return null;
   return { username: session.username };
-}
-
-// A short, human-shareable temporary password for admin-initiated resets.
-function generateTempPassword(): string {
-  // 9 url-safe chars — enough entropy for a temp credential the user changes
-  // implicitly by being reset again if needed.
-  return randomBytes(7).toString('base64url').slice(0, 9);
 }
 
 export async function GET(req: Request) {
@@ -92,9 +84,11 @@ export async function POST(req: Request) {
       case 'resetPassword': {
         // Admin may supply a specific password; otherwise we generate a
         // temporary one and return it so they can share it with the user.
+        // Either way it is stored as a *temporary* password, so the user is
+        // asked to choose their own the next time they open the app.
         const supplied = typeof body.password === 'string' ? body.password : '';
-        const temp = supplied.length >= 6 ? supplied : generateTempPassword();
-        await dbSetUserPassword(id, hashPassword(temp));
+        const temp = supplied.length >= MIN_PASSWORD_LEN ? supplied : generateTempPassword();
+        await dbSetUserPassword(id, hashPassword(temp, { temporary: true }));
         return NextResponse.json({ ok: true, password: temp });
       }
       case 'delete':

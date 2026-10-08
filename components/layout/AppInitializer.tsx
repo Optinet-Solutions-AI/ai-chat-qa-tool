@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useStore } from '@/lib/store';
 
 export default function AppInitializer({ children }: { children: React.ReactNode }) {
-  const { loadState, isLoaded, setCurrentUser, setCurrentRole } = useStore();
+  const { loadState, isLoaded, setCurrentUser, setCurrentRole, setMustChangePassword } = useStore();
 
   useEffect(() => {
     loadState();
@@ -13,9 +13,10 @@ export default function AppInitializer({ children }: { children: React.ReactNode
     // note attribution, and admin-only UI all reflect the real account.
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((me: { username?: string; role?: 'admin' | 'standard' } | null) => {
+      .then((me: { username?: string; role?: 'admin' | 'standard'; mustChangePassword?: boolean } | null) => {
         if (me?.username) setCurrentUser(me.username);
         if (me?.role) setCurrentRole(me.role);
+        setMustChangePassword(!!me?.mustChangePassword);
       })
       .catch(() => {/* stay logged-out; middleware will redirect protected pages */});
     // eslint-disable-next-line react-hooks/exhaustive-deps

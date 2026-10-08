@@ -14,10 +14,15 @@ interface AppState {
   // Access role of the logged-in user, sourced from /api/auth/me. Empty until
   // identity loads; gates admin-only UI (e.g. the Prompt Library nav item).
   currentRole: Role | '';
+  // True while the account is on an admin-issued temporary password (from
+  // /api/auth/me). Drives the first-visit "set your own password" prompt;
+  // cleared client-side as soon as the user changes it.
+  mustChangePassword: boolean;
   isLoaded: boolean;
 
   setCurrentUser: (name: string) => void;
   setCurrentRole: (role: Role | '') => void;
+  setMustChangePassword: (v: boolean) => void;
 
   // Conversations
   addConversation: (c: Conversation) => void;
@@ -43,6 +48,7 @@ export const useStore = create<AppState>((set) => ({
   prompts: [],
   currentUser: '',
   currentRole: '',
+  mustChangePassword: false,
   isLoaded: false,
 
   setCurrentUser: (name) => {
@@ -54,6 +60,10 @@ export const useStore = create<AppState>((set) => ({
 
   setCurrentRole: (role) => {
     set({ currentRole: role });
+  },
+
+  setMustChangePassword: (v) => {
+    set({ mustChangePassword: v });
   },
 
   addConversation: (c) => {

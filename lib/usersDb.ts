@@ -8,6 +8,7 @@
 
 import { supabase } from './supabase';
 import type { AppUser, Role, UserStatus } from './users';
+import { isTemporaryPasswordHash } from './password';
 
 const TABLE = 'app_users';
 
@@ -21,21 +22,26 @@ function mapUser(r: Record<string, any>): AppUser {
     team: r.team,
     status: r.status,
     snapshot: !!r.snapshot,
+    // Only the boolean leaves this module — the hash itself never reaches the
+    // admin list payload.
+    passwordTemporary: isTemporaryPasswordHash(r.password_hash),
     createdAt: r.created_at,
     approvedAt: r.approved_at ?? null,
     approvedBy: r.approved_by ?? null,
   };
 }
 
-// What the login route needs: identity + role + status + the hash to verify
-// against. Kept separate from AppUser so the password hash never leaks into
-// the admin list payload.
+// What the login / me / change-password routes need: identity + role + status
+// + the hash to verify against. Kept separate from AppUser so the password
+// hash never leaks into the admin list payload.
 export interface AuthUser {
   id: string;
   username: string;
   role: Role;
   status: UserStatus;
   passwordHash: string;
+  /** Still on an admin-issued temporary password → prompt them to set one. */
+  mustChangePassword: boolean;
 }
 
 // Case-insensitive username lookup for the login path. Returns null if the
@@ -60,6 +66,7 @@ export async function dbFindAuthUser(username: string): Promise<AuthUser | null>
     role: data.role,
     status: data.status,
     passwordHash: data.password_hash,
+    mustChangePassword: isTemporaryPasswordHash(data.password_hash),
   };
 }
 
@@ -152,11 +159,12 @@ export async function dbCreateUser(u: NewUser): Promise<AppUser> {
   return mapUser(data);
 }
 
-// Full roster for the admin management page, newest first.
+// Full roster for the admin management page, newest first. password_hash is
+// read only so mapUser can derive the passwordTemporary flag.
 export async function dbListUsers(): Promise<AppUser[]> {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('id, username, email, team, role, status, snapshot, created_at, approved_at, approved_by')
+    .select('id, username, email, team, role, status, snapshot, password_hash, created_at, approved_at, approved_by')
     .order('created_at', { ascending: false });
   if (error) {
     console.error('[usersDb] listUsers:', error.message);
@@ -205,7 +213,7 @@ export function dbSetUserSnapshot(id: string, snapshot: boolean): Promise<void> 
   return patchUser(id, { snapshot }, 'setUserSnapshot');
 }
 
-// Admin-initiated password reset: store a freshly hashed password.
+// Store a freshly hashed password (admin reset or self-service change).
 export function dbSetUserPassword(id: string, passwordHash: string): Promise<void> {
   return patchUser(id, { password_hash: passwordHash }, 'setUserPassword');
 }

@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Orbitron } from 'next/font/google';
 import { TEAMS } from '@/lib/users';
+import { PW_PROMPT_SKIPPED_KEY } from '@/components/layout/FirstLoginPasswordPrompt';
 
 // Self-hosted at build time by next/font — no runtime network call.
 const orbitron = Orbitron({ subsets: ['latin'], weight: ['500', '700'] });
@@ -113,6 +114,13 @@ function LoginForm() {
         }
         setSubmitting(false);
         return;
+      }
+      // A fresh sign-in always gets the temporary-password prompt again, even
+      // if it was skipped earlier in this browser session.
+      try {
+        sessionStorage.removeItem(PW_PROMPT_SKIPPED_KEY);
+      } catch {
+        /* ignore */
       }
       router.replace(nextPath.startsWith('/') ? nextPath : '/');
     } catch {

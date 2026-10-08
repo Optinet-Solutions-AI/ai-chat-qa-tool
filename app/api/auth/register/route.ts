@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { dbCreateUser, dbUsernameExists } from '@/lib/usersDb';
 import { hashPassword } from '@/lib/password';
-import { isTeam, roleForTeam, defaultSnapshotForTeam } from '@/lib/users';
+import { isTeam, roleForTeam, defaultSnapshotForTeam, MIN_PASSWORD_LEN } from '@/lib/users';
 
 export const runtime = 'nodejs';
 
@@ -12,7 +12,6 @@ export const runtime = 'nodejs';
 // The team the user picks here is only a *request* — on approval the admin
 // confirms or overrides it (and the role is re-derived from the final team).
 
-const MIN_PASSWORD_LEN = 6;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export async function POST(req: Request) {
