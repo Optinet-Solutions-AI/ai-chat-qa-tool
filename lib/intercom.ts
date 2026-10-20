@@ -1,5 +1,5 @@
 import type { ConversationFetchResult, PlayerCompany, PlayerEventSummary, RawMessage } from './types';
-import { amFromGroups } from './utils';
+import { amFromGroups, normalizeBrand } from './utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -257,7 +257,7 @@ export async function searchConversationsByDate(
         player_name: c.source?.author?.name ?? null,
         player_email: c.source?.author?.email ?? null,
         player_id: c.source?.author?.id ?? null,
-        brand: (attrs['Brand'] as string) ?? null,
+        brand: normalizeBrand(attrs['Brand'] as string),
         query_type: (attrs['Query Type'] as string) ?? null,
         state: c.state ?? 'unknown',
       });
@@ -393,7 +393,7 @@ export async function fetchIntercomData(
     agent_name: firstAdminPart?.author?.name ?? null,
     agent_email: firstAdminPart?.author?.email ?? null,
     is_bot_handled: isBotHandled,
-    brand: (attrs['Brand'] as string) ?? null,
+    brand: normalizeBrand(attrs['Brand'] as string),
     query_type: (attrs['Query Type'] as string) ?? null,
     ai_subject: (attrs['AI Chat subject'] as string) ?? null,
     ai_issue_summary: (attrs['AI Issue summary'] as string) ?? null,

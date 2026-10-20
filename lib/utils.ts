@@ -268,6 +268,26 @@ export function cleanPlayerName(name: string | null): string | null {
   return s.trim() || null;
 }
 
+// ── Brand renames ────────────────────────────────────────────────────────────
+// Intercom's `Brand` custom attribute still carries a brand's old trading name
+// after a rebrand, so normalise it on the way in. Applied at the ingest boundary
+// (lib/intercom.ts) so the DB stores one canonical label — that keeps the
+// dashboard filter options, the brand breakdown and the daily snapshot on a
+// single name instead of splitting a brand across two rows. Already-collected
+// rows are migrated with a one-off backfill of `conversations.brand`.
+//   2026-09: Nova Dreams -> Super Play
+const BRAND_RENAMES: Record<string, string> = {
+  'nova dreams': 'Super Play',
+  'novadreams': 'Super Play',
+};
+
+export function normalizeBrand(brand: string | null | undefined): string | null {
+  if (!brand) return null;
+  const trimmed = brand.trim();
+  if (!trimmed) return null;
+  return BRAND_RENAMES[trimmed.toLowerCase()] ?? trimmed;
+}
+
 // Nova Dreams migrated its backoffice DOMAIN in 2026-06:
 // novadreams.casino-backend.com -> backoffice.novadreams-matu.com. The player ID
 // is PRESERVED across the migration (Val-confirmed 2026-07-08: old
