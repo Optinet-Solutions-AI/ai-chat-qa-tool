@@ -1411,24 +1411,51 @@ export async function createAsanaTaskForConversation(
     }
 
     // 3. Set project-local custom fields + assignee now the task is in the project.
-    const updateData: Record<string, unknown> = {};
-    if (Object.keys(customFields).length > 0) updateData.custom_fields = customFields;
-    if (assigneeGid) updateData.assignee = assigneeGid;
-    if (Object.keys(updateData).length > 0) {
-      const upRes = await fetch(`${ASANA_API}/tasks/${gid}`, {
-        method: 'PUT', headers: authHeaders, body: JSON.stringify({ data: updateData }),
-      });
-      if (!upRes.ok) {
-        const body = await upRes.text().catch(() => '');
-        console.error(`[asana] set fields/assignee failed (${upRes.status}): ${body.slice(0, 200)}`);
-      }
-    }
+    await putFieldsAndAssignee(gid, customFields, assigneeGid, authHeaders, 'set fields/assignee');
 
     return gid;
   } catch (e) {
     console.error('[asana] create task exception:', (e as Error).message);
     return null;
   }
+}
+
+// Writes custom fields + assignee in one PUT. Asana rejects the whole request
+// if any part is invalid, and the usual culprit is the assignee: an AM who left
+// the workspace keeps a dead gid in ASANA_AM_USER_MAP ("Not a valid actor ID").
+// That once blanked every field on every Niklas ticket for four days
+// (2026-10-16..20), so when a combined write fails we retry without the
+// assignee. The fields always land; the ticket just stays unassigned.
+// Returns true only if everything that was asked for was written.
+async function putFieldsAndAssignee(
+  taskGid: string,
+  customFields: Record<string, string>,
+  assigneeGid: string | null,
+  authHeaders: Record<string, string>,
+  logLabel: string,
+): Promise<boolean> {
+  const hasFields = Object.keys(customFields).length > 0;
+  const put = async (data: Record<string, unknown>) => {
+    const res = await fetch(`${ASANA_API}/tasks/${taskGid}`, {
+      method: 'PUT', headers: authHeaders, body: JSON.stringify({ data }),
+    });
+    if (res.ok) return true;
+    const body = await res.text().catch(() => '');
+    console.error(`[asana] ${logLabel} failed (${res.status}): ${body.slice(0, 200)}`);
+    return false;
+  };
+
+  const data: Record<string, unknown> = {};
+  if (hasFields) data.custom_fields = customFields;
+  if (assigneeGid) data.assignee = assigneeGid;
+  if (Object.keys(data).length === 0) return true;
+  if (await put(data)) return true;
+
+  if (assigneeGid && hasFields) {
+    console.warn(`[asana] ${logLabel}: retrying without assignee ${assigneeGid} (check ASANA_AM_USER_MAP)`);
+    await put({ custom_fields: customFields });
+  }
+  return false;
 }
 
 // ── Re-routing existing tickets when a player changes portfolio ─────────────
@@ -1498,24 +1525,16 @@ export async function rerouteAsanaTaskToAm(
       amAssigneeDisabled ? Promise.resolve(null) : resolveAssigneeForAm(effectiveAm),
     ]);
 
-    const updateData: Record<string, unknown> = {};
+    const customFields: Record<string, string> = {};
     const amFieldGid = process.env.ASANA_AM_FIELD_GID;
-    if (amFieldGid && amOptionGid) updateData.custom_fields = { [amFieldGid]: amOptionGid };
-    if (assigneeGid) updateData.assignee = assigneeGid;
+    if (amFieldGid && amOptionGid) customFields[amFieldGid] = amOptionGid;
 
-    if (Object.keys(updateData).length > 0) {
-      const upRes = await fetch(`${ASANA_API}/tasks/${taskGid}`, {
-        method: 'PUT', headers: authHeaders, body: JSON.stringify({ data: updateData }),
-      });
-      if (!upRes.ok) {
-        const body = await upRes.text().catch(() => '');
-        // The move already landed, so report failure but don't pretend nothing
-        // happened — the next tick re-runs this idempotently.
-        console.error(`[asana] reroute fields/assignee ${taskGid} failed (${upRes.status}): ${body.slice(0, 200)}`);
-        return { ok: false, owner: effectiveAm };
-      }
-    }
-    return { ok: true, owner: effectiveAm };
+    // The move already landed, so on failure report it but don't pretend
+    // nothing happened — the next tick re-runs this idempotently.
+    const ok = await putFieldsAndAssignee(
+      taskGid, customFields, assigneeGid, authHeaders, `reroute fields/assignee ${taskGid}`,
+    );
+    return { ok, owner: effectiveAm };
   } catch (e) {
     console.error(`[asana] reroute ${taskGid} exception:`, (e as Error).message);
     return { ok: false, owner: null };
