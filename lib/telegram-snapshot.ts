@@ -8,12 +8,19 @@ import { fetchOpenProjectTasks } from '@/lib/asana';
 //     "Niklas (Christian NON-VIP)") to disambiguate cross-segment routing.
 //   AM_SEGMENT   — classification used to group rows in the snapshot so VIP
 //     AMs come first, then NON-VIP, then OTHER (SoftSwiss/Unassigned). AMs
-//     that handle both halves of a base (e.g. Nik covers VIP+NON-VIP Ada)
-//     land in VIP since "any VIP responsibility → VIP block".
+//     that handle both halves of a base land in VIP since "any VIP
+//     responsibility → VIP block".
 type AmSegment = 'VIP' | 'NON-VIP' | 'OTHER';
+
+// Legacy keys GROUP_TO_AM keeps only so already-collected rows still resolve.
+// Ada has left (her groups were renamed to *_nik), so her name must not show
+// up in the snapshot labels.
+const LEGACY_GROUPS = new Set(['vip_ada', 'non-vip_ada']);
+
 const { AM_PORTFOLIO, AM_SEGMENT } = (() => {
   const groupsByAm = new Map<string, string[]>();
   for (const [group, am] of Object.entries(GROUP_TO_AM)) {
+    if (LEGACY_GROUPS.has(group)) continue;
     const list = groupsByAm.get(am) ?? [];
     list.push(group);
     groupsByAm.set(am, list);
@@ -30,7 +37,7 @@ const { AM_PORTFOLIO, AM_SEGMENT } = (() => {
       portfolio[am] = [...bases].map(capitalise).join(', ');
     } else {
       const baseDisplay = capitalise([...bases][0]);
-      if (hasVip && hasNonVip)      portfolio[am] = baseDisplay;             // Nik → "Ada"
+      if (hasVip && hasNonVip)      portfolio[am] = baseDisplay;
       else if (hasVip)              portfolio[am] = `${baseDisplay} VIP`;    // Christian → "Christian VIP"
       else if (hasNonVip)           portfolio[am] = `${baseDisplay} NON-VIP`;// Niklas → "Christian NON-VIP"
       else                          portfolio[am] = baseDisplay;             // SoftSwiss
