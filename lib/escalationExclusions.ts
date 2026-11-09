@@ -13,13 +13,14 @@
 //   • BACKEND player link — normalised to "<host>/players/<id>", so the same
 //                           numeric id under a different brand doesn't collide
 //                           and a link can be pasted in verbatim from Asana.
-//                           Use the player's CURRENT backoffice domain (the
-//                           Nova Dreams host rewrite in lib/utils.ts has
-//                           already been applied by the time we compare).
+//                           Old or new backoffice domain both work: the host
+//                           rewrites in lib/utils.ts are applied to both sides.
 //
 // More players can be excluded without a deploy via ESCALATION_EXCLUDED_PLAYERS:
 // a comma- or newline-separated list of emails and/or BACKEND URLs, merged with
 // the entries below.
+
+import { migrateBackofficeUrl } from '@/lib/utils';
 
 const EXCLUDED_PLAYERS: readonly string[] = [
   // Mitchell Bowden — lucky7even / Rooster Partners, L7. Requested by Jose
@@ -36,8 +37,10 @@ export interface EscalationPlayerRef {
 // "https://host/backend/players/292915?tab=x" -> "host/players/292915".
 // Accepts scheme-less entries so "lucky7even.casino-backend.com/players/292915"
 // works too. Returns null for anything without a numeric player id.
+// Retired backoffice domains are migrated first, so an entry pasted with a
+// brand's old casino-backend.com link still matches the rewritten backlink.
 function normalizeBackendLink(raw: string): string | null {
-  const m = raw
+  const m = migrateBackofficeUrl(raw)
     .trim()
     .replace(/^https?:\/\//i, '')
     .match(/^([^/\s]+)\/.*?players\/(\d+)/i);

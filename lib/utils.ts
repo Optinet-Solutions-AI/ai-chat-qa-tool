@@ -298,9 +298,36 @@ export function normalizeBrand(brand: string | null | undefined): string | null 
 // every Nova Dreams player whose Intercom backlink still carries the old domain.
 // URLs already on the new domain don't match and pass through unchanged. The
 // long-term fix is still to update the backlink attributes in Intercom upstream.
-const BACKLINK_HOST_REWRITES: Array<[RegExp, string]> = [
-  [/^https:\/\/novadreams\.casino-backend\.com(\/|$)/i, 'https://backoffice.novadreams-matu.com$1'],
-];
+//
+// 2026-11-09 (Val): 7 more brands moved off <brand>.casino-backend.com onto their
+// own backoffice domains; AMs can no longer open the old links. Same pattern —
+// host swap, /backend/players/<id> path untouched.
+const BACKOFFICE_DOMAIN_MIGRATIONS: Record<string, string> = {
+  novadreams: 'https://backoffice.novadreams-matu.com',
+  fortuneplay: 'https://backoffice.fortuneplay-fofu.com',
+  luckyvibe: 'https://backoffice.luckyvibe-duwi.com',
+  playmojo: 'https://backoffice.playmojo-tahje.com',
+  rocketspin: 'https://backoffice.rocketspin-juxy.com',
+  rooster: 'https://backoffice.rooster-zehje.com',
+  spinjo: 'https://backoffice.spinjo-tyre.com',
+  spinsup: 'https://backoffice.spinsup-roro.com',
+};
+
+// Scheme is optional so scheme-less links (e.g. hand-typed escalation
+// exclusions) migrate too; the rewritten URL always gets https://.
+const BACKLINK_HOST_REWRITES: Array<[RegExp, string]> = Object.entries(BACKOFFICE_DOMAIN_MIGRATIONS).map(
+  ([slug, newOrigin]) => [new RegExp(`^(?:https?://)?${slug}\\.casino-backend\\.com(/|$)`, 'i'), `${newOrigin}$1`],
+);
+
+// Moves a BACKEND link off a retired backoffice domain; anything else passes
+// through unchanged.
+export function migrateBackofficeUrl(raw: string): string {
+  const url = raw.trim();
+  for (const [pattern, replacement] of BACKLINK_HOST_REWRITES) {
+    if (pattern.test(url)) return url.replace(pattern, replacement);
+  }
+  return raw;
+}
 
 export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attributes'>): string | null {
   const raw = getCustomAttr(
@@ -308,10 +335,7 @@ export function getBacklinkFull(conv: Pick<Conversation, 'player_custom_attribut
     'backlinkfull', 'backlink_full', 'backlinkFull', 'BacklinkFull', 'backlink',
   );
   if (!raw) return null;
-  for (const [pattern, replacement] of BACKLINK_HOST_REWRITES) {
-    if (pattern.test(raw)) return raw.replace(pattern, replacement);
-  }
-  return raw;
+  return migrateBackofficeUrl(raw);
 }
 
 // ── AI summary helpers ───────────────────────────────────────────────────────
