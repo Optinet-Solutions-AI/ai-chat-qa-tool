@@ -302,6 +302,7 @@ export function normalizeBrand(brand: string | null | undefined): string | null 
 // 2026-11-09 (Val): 7 more brands moved off <brand>.casino-backend.com onto their
 // own backoffice domains; AMs can no longer open the old links. Same pattern —
 // host swap, /backend/players/<id> path untouched.
+// 2026-11-19 (Val): Lucky7even and Rollero followed.
 const BACKOFFICE_DOMAIN_MIGRATIONS: Record<string, string> = {
   novadreams: 'https://backoffice.novadreams-matu.com',
   fortuneplay: 'https://backoffice.fortuneplay-fofu.com',
@@ -311,6 +312,8 @@ const BACKOFFICE_DOMAIN_MIGRATIONS: Record<string, string> = {
   rooster: 'https://backoffice.rooster-zehje.com',
   spinjo: 'https://backoffice.spinjo-tyre.com',
   spinsup: 'https://backoffice.spinsup-roro.com',
+  lucky7even: 'https://backoffice.lucky7even-deze.com',
+  rollero: 'https://backoffice.rollero-laqi.com',
 };
 
 // Scheme is optional so scheme-less links (e.g. hand-typed escalation
