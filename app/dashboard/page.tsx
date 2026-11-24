@@ -135,6 +135,10 @@ function mergeDashboard(s: ScopedDashboardData, g: GlobalDashboardData): Dashboa
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes — beyond this, refetch in background
 
+// Open-dashboard auto-refresh cadence. See the auto-refresh effect in
+// DashboardPage for why this is not shorter (Supabase Disk IO).
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
 // Hard floor for the dashboard — kept in sync with ANALYSIS_MIN_DATE_ISO in
 // lib/analyticsFilters.ts. Pre-cutoff dates are silently bumped up to here so
 // stale values can't render an empty dashboard.
@@ -786,20 +790,37 @@ export default function DashboardPage() {
     fetchGlobal(undefined, true);
   }, [fetchScoped, fetchGlobal]);
 
-  // Auto-poll Asana every 60s while the dashboard is open so the Resolved
-  // counter reflects ticket closures within a minute instead of waiting for
-  // the 15-min cron. Each tick pulls fresh statuses into the DB, then forces
-  // a dashboard refetch. Skips when the tab is hidden to avoid background load.
+  // Auto-refresh while the dashboard is open so the Resolved counter reflects
+  // Asana closures without waiting for the 15-min cron. Each tick is one
+  // refreshAll (one Asana sync, then a forced refetch of both slices).
+  //
+  // Every forced refetch rebuilds the whole dashboard from the DB (tens of
+  // paginated reads over the 30-day window), multiplied by every open tab, so
+  // this interval is the main lever on Supabase Disk IO. It was 60s (and each
+  // tick ran the Asana sync twice), which helped drain the IO budget in Nov
+  // 2026. Hidden tabs skip ticks; a tab that comes back into view after the
+  // interval has passed refreshes immediately, so returning users never see
+  // numbers older than this. The Refresh button still syncs on demand.
+  const lastAutoRefreshRef = useRef(Date.now());
   useEffect(() => {
-    const tick = async () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      try {
-        await fetch('/api/dashboard/asana/sync');
-      } catch { /* sync errors shouldn't block the refresh */ }
+    const run = () => {
+      lastAutoRefreshRef.current = Date.now();
       refreshAll();
     };
-    const id = setInterval(tick, 60_000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      run();
+    };
+    const onVisible = () => {
+      if (document.hidden) return;
+      if (Date.now() - lastAutoRefreshRef.current >= AUTO_REFRESH_MS) run();
+    };
+    const id = setInterval(tick, AUTO_REFRESH_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refreshAll]);
 
   // Loading is the initial cold-start skeleton — true only when neither half
