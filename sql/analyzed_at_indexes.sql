@@ -28,10 +28,22 @@ create index concurrently if not exists conversations_open_asana_analyzed_at_idx
     and asana_task_deleted_at is null
     and asana_completed_at is null;
 
+-- 3. Open Asana tickets by id (added 2026-11-26). Serves the Asana sync's AM
+--    re-derive pass (lib/db.ts dbListOpenTicketsForAmRederive), which every
+--    15 min lists open tickets ORDER BY id. Through the live-ticket index it
+--    had to read all ~16k ticketed rows to find the ~26 open ones, and timed
+--    out a few times a day. Now about 0.15-0.8s.
+create index concurrently if not exists conversations_open_asana_id_idx
+  on public.conversations (id)
+  where asana_task_gid is not null
+    and asana_task_deleted_at is null
+    and asana_completed_at is null;
 
--- ── Check (read-only): both should appear, and the second query should be empty ──
+
+-- ── Check (read-only): all three should appear, and the second query should be empty ──
 -- select indexname from pg_indexes
--- where indexname in ('analysis_runs_analyzed_at_idx', 'conversations_open_asana_analyzed_at_idx');
+-- where indexname in ('analysis_runs_analyzed_at_idx', 'conversations_open_asana_analyzed_at_idx',
+--                     'conversations_open_asana_id_idx');
 --
 -- select c.relname from pg_index i join pg_class c on c.oid = i.indexrelid
 -- where not i.indisvalid;
